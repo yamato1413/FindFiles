@@ -18,29 +18,15 @@ public class Program
     {
         Application.Run(new MainForm());
     }
-
-    public static string OriginalPath(string PathShortcut)
-    {
-        if (!PathShortcut.EndsWith(".lnk")) return PathShortcut;
-
-        // WshShellを作成
-        Type t = Type.GetTypeFromCLSID(new Guid("72C24DD5-D70A-438B-8A42-98424B88AFB8"));
-        dynamic shell = Activator.CreateInstance(t);
-
-        //WshShortcutを作成
-        var shortcut = shell.CreateShortcut(PathShortcut);
-
-        // ショートカットがさしているパスを取得
-        string TargetPath = shortcut.TargetPath;
-
-        // ショートカットの先がショートカットだった場合再帰呼び出しする。
-        return TargetPath.EndsWith(".lnk") ? OriginalPath(TargetPath) : TargetPath;
-    }
 }
 
 public class MainForm : Form
 {
     private const string SAVEDATA = @"SOFTWARE\Yamato\FindFiles";
+    private RegistryKey reg = Registry.CurrentUser.CreateSubKey(SAVEDATA);
+
+    private const int BIT_FOLDER = 1;
+    private const int BIT_FILE = 2;
 
     private System.Windows.Forms.Label lblBaseDirectory = new System.Windows.Forms.Label();
     private System.Windows.Forms.Label lblPattern = new System.Windows.Forms.Label();
@@ -62,169 +48,177 @@ public class MainForm : Form
     private DataGridView lvResult = new DataGridView();
     private ProgressBar progress = new ProgressBar();
 
-    private int ControlsHeight = 25;
-    private int ControlsLeft = 20;
-    private int BaseDirectoryTop = 30;
-    private int SearchCondTop = 90;
-    private int ResultTop = 150;
+    private int heightControls = 25;
+    private int leftControls = 20;
+    private int topBaseDirectory = 30;
+    private int topSearchCond = 90;
+    private int topResult = 150;
 
-    private bool Cancel = false;
+    private bool cancel = false;
 
-    // コンストラクタ
     public MainForm()
     {
+        // フォームの初期化
+        int[] pos = reg.GetValue("Position", "30 30 600 500")
+                       .ToString()
+                       .Split(' ')
+                       .Select(x => int.Parse(x))
+                       .ToArray();
+        this.StartPosition = FormStartPosition.Manual;
+        this.Location = new Point(pos[0], pos[1]);
+        this.Size = new Size(pos[2], pos[3]);
+        this.MinimumSize = new Size(400, 250);
         this.Text = "フォルダ・ファイル検索 - ISHII_Tools";
-        this.Size = new Size(600, 510);
         this.AllowDrop = true;
+        // フォームを閉じるときに位置とサイズを記録する
+        this.Closing += ((object sender, System.ComponentModel.CancelEventArgs e) =>
+        {
+            pos = new int[] { Left, Top, Width, Height }.Select(x => x < 0 ? 0 : x).ToArray();
+            reg.SetValue("Position", string.Join(" ", pos.Select(x => x.ToString())));
+        });
 
+        // コントロールの初期化
         InitBaseDirectory();
         InitSearchCond();
         InitResult();
-
-        // 前回の検索条件を読み込む
-        RegistryKey reg = Registry.CurrentUser.OpenSubKey(SAVEDATA);
-        if (reg != null)
-        {
-            this.txtBaseDirectory.Text = reg.GetValue("BaseDirectory").ToString();
-            this.txtPattern.Text = reg.GetValue("Pattern").ToString();
-            this.txtDepth.Text = reg.GetValue("Depth").ToString();
-        }
     }
 
-    // コントロールの初期化処理
     private void InitBaseDirectory()
     {
-        this.lblBaseDirectory.Location = new Point(ControlsLeft, BaseDirectoryTop - 20);
-        this.lblBaseDirectory.Size = new Size(500, 18);
-        this.lblBaseDirectory.Text = "探索開始フォルダ(フォルダをドラッグ&ドロップで指定可)";
-        this.lblBaseDirectory.Font = new Font(new FontFamily("BIZ UDゴシック"), 10);
-        this.Controls.Add(lblBaseDirectory);
+        lblBaseDirectory.Location = new Point(leftControls, topBaseDirectory - 20);
+        lblBaseDirectory.Size = new Size(370, 18);     // 文字数ベースなのでマジックナンバーでよい
+        lblBaseDirectory.Text = "探索開始フォルダ(フォルダをドラッグ&ドロップで指定可)";
+        lblBaseDirectory.Font = new Font(new FontFamily("BIZ UDゴシック"), 10);
+        Controls.Add(lblBaseDirectory);
 
-        this.txtBaseDirectory.AutoSize = false;
-        this.txtBaseDirectory.Location = new Point(ControlsLeft, BaseDirectoryTop);
-        this.txtBaseDirectory.Size = new Size(510, ControlsHeight);
-        this.txtBaseDirectory.BorderStyle = BorderStyle.FixedSingle;
-        this.txtBaseDirectory.AllowDrop = true;
-        this.txtBaseDirectory.DragDrop += txtBaseDirectory_DragDrop;
-        this.txtBaseDirectory.DragEnter += txtBaseDirectory_DragEnter;
-        this.txtBaseDirectory.KeyDown += textBox_KeyDown;
-        this.txtBaseDirectory.Anchor = (AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right);
-        this.txtBaseDirectory.Font = new Font(new FontFamily("BIZ UDゴシック"), 12);
-        this.Controls.Add(txtBaseDirectory);
+        txtBaseDirectory.AutoSize = false;
+        txtBaseDirectory.Location = new Point(leftControls, topBaseDirectory);
+        txtBaseDirectory.Size = new Size(Width - 100, heightControls);
+        txtBaseDirectory.BorderStyle = BorderStyle.FixedSingle;
+        txtBaseDirectory.AllowDrop = true;
+        txtBaseDirectory.DragDrop += txtBaseDirectory_DragDrop;
+        txtBaseDirectory.DragEnter += txtBaseDirectory_DragEnter;
+        txtBaseDirectory.KeyDown += textBox_KeyDown;
+        txtBaseDirectory.Anchor = (AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right);
+        txtBaseDirectory.Font = new Font(new FontFamily("BIZ UDゴシック"), 12);
+        txtBaseDirectory.Text = reg.GetValue("BaseDirectory", @"C:\").ToString();
+        Controls.Add(txtBaseDirectory);
 
-        this.btnDirectory.Location = new Point(530, BaseDirectoryTop);
-        this.btnDirectory.Size = new Size(30, ControlsHeight);
-        this.btnDirectory.Text = "..";
-        this.btnDirectory.Anchor = (AnchorStyles.Top | AnchorStyles.Right);
-        this.btnDirectory.Click += btnDirectory_Click;
-        this.btnDirectory.Font = new Font(new FontFamily("BIZ UDゴシック"), 12);
-        this.Controls.Add(btnDirectory);
+        btnDirectory.Location = new Point(txtBaseDirectory.Right + 10, topBaseDirectory);
+        btnDirectory.Size = new Size(30, heightControls);
+        btnDirectory.Text = "..";
+        btnDirectory.Anchor = (AnchorStyles.Top | AnchorStyles.Right);
+        btnDirectory.Click += btnDirectory_Click;
+        btnDirectory.Font = new Font(new FontFamily("BIZ UDゴシック"), 12);
+        Controls.Add(btnDirectory);
     }
 
     private void InitSearchCond()
     {
-        this.lblPattern.Location = new Point(ControlsLeft, SearchCondTop - 20);
-        this.lblPattern.Size = new Size(60, 18);
-        this.lblPattern.Text = "検索条件";
-        this.lblPattern.Font = new Font(new FontFamily("BIZ UDゴシック"), 10);
-        this.Controls.Add(lblPattern);
+        lblPattern.Location = new Point(leftControls, topSearchCond - 20);
+        lblPattern.Size = new Size(60, 18);
+        lblPattern.Text = "検索条件";
+        lblPattern.Font = new Font(new FontFamily("BIZ UDゴシック"), 10);
+        Controls.Add(lblPattern);
 
-        this.chkFolder.Location = new Point(ControlsLeft + 60, SearchCondTop - 20);
-        this.chkFolder.Size = new Size(80, 18);
-        this.chkFolder.Text = "フォルダ";
-        this.chkFolder.Font = new Font(new FontFamily("BIZ UDゴシック"), 10);
-        this.chkFolder.Checked = true;
-        this.Controls.Add(chkFolder);
+        chkFolder.Location = new Point(lblPattern.Right, topSearchCond - 20);
+        chkFolder.Size = new Size(80, 18);
+        chkFolder.Text = "フォルダ";
+        chkFolder.Font = new Font(new FontFamily("BIZ UDゴシック"), 10);
+        chkFolder.Checked = Convert.ToBoolean(reg.GetValue("ShouldSearchFolder", 1));
+        Controls.Add(chkFolder);
 
-        this.chkFile.Location = new Point(ControlsLeft + 140, SearchCondTop - 20);
-        this.chkFile.Size = new Size(80, 18);
-        this.chkFile.Text = "ファイル";
-        this.chkFile.Font = new Font(new FontFamily("BIZ UDゴシック"), 10);
-        this.chkFile.Checked = true;
-        this.Controls.Add(chkFile);
+        chkFile.Location = new Point(chkFolder.Right, topSearchCond - 20);
+        chkFile.Size = new Size(80, 18);
+        chkFile.Text = "ファイル";
+        chkFile.Font = new Font(new FontFamily("BIZ UDゴシック"), 10);
+        chkFile.Checked = Convert.ToBoolean(reg.GetValue("ShouldSearchFile", 1));
+        Controls.Add(chkFile);
 
-        this.chkSort.Location = new Point(ControlsLeft + 220, SearchCondTop - 20);
-        this.chkSort.Size = new Size(160, 18);
-        this.chkSort.Text = "検索終了後にソート";
-        this.chkSort.Font = new Font(new FontFamily("BIZ UDゴシック"), 10);
-        this.chkSort.Checked = false;
-        this.Controls.Add(chkSort);
+        chkSort.Location = new Point(chkFile.Right, topSearchCond - 20);
+        chkSort.Size = new Size(160, 18);
+        chkSort.Text = "検索終了後にソート";
+        chkSort.Font = new Font(new FontFamily("BIZ UDゴシック"), 10);
+        chkSort.Checked = Convert.ToBoolean(reg.GetValue("ShouldSort", 0));
+        Controls.Add(chkSort);
 
-        this.txtPattern.AutoSize = false;
-        this.txtPattern.Location = new Point(ControlsLeft, SearchCondTop);
-        this.txtPattern.Size = new Size(250, ControlsHeight);
-        this.txtPattern.BorderStyle = BorderStyle.FixedSingle;
-        this.txtPattern.Anchor = (AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right);
-        this.txtPattern.Font = new Font(new FontFamily("BIZ UDゴシック"), 12);
-        this.txtPattern.KeyDown += textBox_KeyDown;
-        this.Controls.Add(txtPattern);
+        txtPattern.AutoSize = false;
+        txtPattern.Location = new Point(leftControls, topSearchCond);
+        txtPattern.Size = new Size(Width - 350, heightControls);
+        txtPattern.BorderStyle = BorderStyle.FixedSingle;
+        txtPattern.Anchor = (AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right);
+        txtPattern.Font = new Font(new FontFamily("BIZ UDゴシック"), 12);
+        txtPattern.Text = reg.GetValue("Pattern", "").ToString();
+        txtPattern.KeyDown += textBox_KeyDown;
+        Controls.Add(txtPattern);
 
-        this.cmbCond.Location = new Point(275, SearchCondTop);
-        this.cmbCond.Size = new Size(120, ControlsHeight);
-        this.cmbCond.Font = new Font(new FontFamily("BIZ UDゴシック"), 12);
-        this.cmbCond.Items.AddRange(new string[] { "を含む", "と一致する", "から始まる", "で終わる" });
-        this.cmbCond.SelectedIndex = 0;
-        this.cmbCond.IntegralHeight = true;
-        this.cmbCond.FlatStyle = FlatStyle.Flat;
-        this.cmbCond.DropDownStyle = ComboBoxStyle.DropDownList;
-        this.cmbCond.Anchor = (AnchorStyles.Top | AnchorStyles.Right);
-        this.Controls.Add(cmbCond);
+        cmbCond.Location = new Point(txtPattern.Right + 5, topSearchCond);
+        cmbCond.Size = new Size(120, heightControls);
+        cmbCond.Font = new Font(new FontFamily("BIZ UDゴシック"), 12);
+        cmbCond.Items.AddRange(new string[] { "を含む", "と一致する", "から始まる", "で終わる" });
+        cmbCond.SelectedIndex = Convert.ToInt32(reg.GetValue("Wildcard", 0));
+        cmbCond.IntegralHeight = true;
+        cmbCond.FlatStyle = FlatStyle.Flat;
+        cmbCond.DropDownStyle = ComboBoxStyle.DropDownList;
+        cmbCond.Anchor = (AnchorStyles.Top | AnchorStyles.Right);
+        Controls.Add(cmbCond);
 
-        this.lblDepth.Location = new Point(400, SearchCondTop - 20);
-        this.lblDepth.Size = new Size(100, 18);
-        this.lblDepth.Text = "探索する深さ";
-        this.lblDepth.Anchor = (AnchorStyles.Top | AnchorStyles.Right);
-        this.lblDepth.Font = new Font(new FontFamily("BIZ UDゴシック"), 10);
-        this.Controls.Add(lblDepth);
+        lblDepth.Location = new Point(cmbCond.Right + 5, topSearchCond - 20);
+        lblDepth.Size = new Size(100, 18);
+        lblDepth.Text = "探索する深さ";
+        lblDepth.Anchor = (AnchorStyles.Top | AnchorStyles.Right);
+        lblDepth.Font = new Font(new FontFamily("BIZ UDゴシック"), 10);
+        Controls.Add(lblDepth);
 
-        this.txtDepth.AutoSize = false;
-        this.txtDepth.Location = new Point(400, SearchCondTop);
-        this.txtDepth.Size = new Size(50, ControlsHeight);
-        this.txtDepth.BorderStyle = BorderStyle.FixedSingle;
-        this.txtDepth.Anchor = (AnchorStyles.Top | AnchorStyles.Right);
-        this.txtDepth.Font = new Font(new FontFamily("BIZ UDゴシック"), 12);
-        this.txtDepth.KeyDown += textBox_KeyDown;
-        this.Controls.Add(txtDepth);
+        txtDepth.AutoSize = false;
+        txtDepth.Location = new Point(cmbCond.Right + 5, topSearchCond);
+        txtDepth.Size = new Size(50, heightControls);
+        txtDepth.BorderStyle = BorderStyle.FixedSingle;
+        txtDepth.Anchor = (AnchorStyles.Top | AnchorStyles.Right);
+        txtDepth.Font = new Font(new FontFamily("BIZ UDゴシック"), 12);
+        txtDepth.Text = reg.GetValue("Depth", 1).ToString();
+        txtDepth.KeyDown += textBox_KeyDown;
+        Controls.Add(txtDepth);
 
-        this.btnSearch.Location = new Point(460, SearchCondTop - 1);
-        this.btnSearch.Size = new Size(100, ControlsHeight);
-        this.btnSearch.Text = "検索";
-        this.btnSearch.Anchor = (AnchorStyles.Top | AnchorStyles.Right);
-        this.btnSearch.Font = new Font(new FontFamily("BIZ UDゴシック"), 12);
-        this.btnSearch.Click += btnSearch_Click;
-        this.Controls.Add(btnSearch);
+        btnSearch.Location = new Point(txtDepth.Right + 10, topSearchCond - 1);
+        btnSearch.Size = new Size(100, heightControls);
+        btnSearch.Text = "検索";
+        btnSearch.Anchor = (AnchorStyles.Top | AnchorStyles.Right);
+        btnSearch.Font = new Font(new FontFamily("BIZ UDゴシック"), 12);
+        btnSearch.Click += btnSearch_Click;
+        Controls.Add(btnSearch);
     }
 
     private void InitResult()
     {
-        this.lvResult.Location = new Point(ControlsLeft, ResultTop);
-        this.lvResult.Size = new Size(540, 310);
-        this.lvResult.BorderStyle = BorderStyle.FixedSingle;
-        this.lvResult.Anchor = (AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right);
-        this.lvResult.ReadOnly = true;   // セルをクリックしたときに編集モードに入らないようにする
-        this.lvResult.MultiSelect = false;
-        this.lvResult.ColumnCount = 1;
-        this.lvResult.Columns[0].Name = "結果一覧";
-        this.lvResult.Columns[0].MinimumWidth = 1350;
-        this.lvResult.Columns[0].AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
-        this.lvResult.CellContentDoubleClick += lvResult_CellContentDoubleClick;
-        this.lvResult.CellPainting += lvResult_CellPainting;
-        this.lvResult.AllowUserToAddRows = false;
-        this.lvResult.AllowUserToDeleteRows = false;
-        this.lvResult.AlternatingRowsDefaultCellStyle.BackColor = Color.LightGray;
-        this.Controls.Add(lvResult);
+        lvResult.Location = new Point(leftControls, topResult);
+        lvResult.Size = new Size(Width - 60, Height - 200);
+        lvResult.BorderStyle = BorderStyle.FixedSingle;
+        lvResult.Anchor = (AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right);
+        lvResult.ReadOnly = true;   // セルをクリックしたときに編集モードに入らないようにする
+        lvResult.MultiSelect = false;
+        lvResult.ColumnCount = 1;
+        lvResult.Columns[0].Name = "結果一覧";
+        lvResult.Columns[0].MinimumWidth = 2400;
+        lvResult.Columns[0].AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
+        lvResult.CellContentDoubleClick += lvResult_CellContentDoubleClick;
+        lvResult.CellPainting += lvResult_CellPainting;
+        lvResult.AllowUserToAddRows = false;
+        lvResult.AllowUserToDeleteRows = false;
+        lvResult.AlternatingRowsDefaultCellStyle.BackColor = Color.LightGray;
+        Controls.Add(lvResult);
 
-        this.progress.Location = new Point(ControlsLeft, 130);
-        this.progress.Size = new Size(150, 20);
-        this.progress.Style = ProgressBarStyle.Continuous;
-        this.Controls.Add(progress);
+        progress.Location = new Point(leftControls, 130);
+        progress.Size = new Size(150, 20);
+        progress.Style = ProgressBarStyle.Continuous;
+        Controls.Add(progress);
 
-        this.lblFinish.Location = new Point(ControlsLeft + 150, 130);
-        this.lblFinish.Size = new Size(80, 20);
-        this.lblFinish.Text = "";
-        this.lblFinish.Anchor = (AnchorStyles.Top | AnchorStyles.Left);
-        this.lblFinish.Font = new Font(new FontFamily("BIZ UDゴシック"), 9);
-        this.Controls.Add(lblFinish);
+        lblFinish.Location = new Point(leftControls + 150, 130);
+        lblFinish.Size = new Size(80, 20);
+        lblFinish.Text = "";
+        lblFinish.Anchor = (AnchorStyles.Top | AnchorStyles.Left);
+        lblFinish.Font = new Font(new FontFamily("BIZ UDゴシック"), 9);
+        Controls.Add(lblFinish);
     }
 
     // イベント処理
@@ -233,69 +227,146 @@ public class MainForm : Form
     {
         FolderSelectDialog dialog = new FolderSelectDialog();
         if (dialog.ShowDialog() == DialogResult.OK)
-            this.txtBaseDirectory.Text = dialog.Path;
+            txtBaseDirectory.Text = dialog.Path;
     }
 
     // 検索ボタン。検索を実行する。
-    private void btnSearch_Click(object sender, EventArgs e)
+    private async void btnSearch_Click(object sender, EventArgs e)
     {
-        if (this.btnSearch.Text == "停止")
+        if (btnSearch.Text == "停止")
         {
-            this.Cancel = true;
+            cancel = true;
             return;
         }
 
-        this.btnSearch.Text = this.btnSearch.Text == "検索" ? "停止" : "検索";
+        // Initialize
+        lblFinish.Text = "";
+        lvResult.Rows.Clear();
+        cancel = false;
+        btnSearch.Text = SwitchString(btnSearch.Text, "検索", "停止");
 
-        this.lblFinish.Text = "";
+        // 検索条件の取り込み
+        string BaseDirectory = txtBaseDirectory.Text == "" ? @"C:\" : txtBaseDirectory.Text;
+        string Pattern = txtPattern.Text == "" ? "*" : txtPattern.Text;
+        int Depth = txtDepth.Text == "" ? 0 : int.Parse(txtDepth.Text);
 
-        this.lvResult.Rows.Clear();
-        Application.DoEvents();
-
-        this.Cancel = false;
-
-        string BaseDirectory = this.txtBaseDirectory.Text;
-        string Pattern = this.txtPattern.Text;
-        int Depth = this.txtDepth.Text == "" ? 0 : int.Parse(this.txtDepth.Text);
-
-        if (BaseDirectory == "") BaseDirectory = @"C:\";
-        if (Pattern == "") Pattern = "*";
-        if (Depth <= 0) Depth = 1;
-
-        if (this.cmbCond.Text == "を含む") Pattern = "*" + Pattern + "*";
-        if (this.cmbCond.Text == "から始まる") Pattern = Pattern + "*";
-        if (this.cmbCond.Text == "で終わる") Pattern = "*" + Pattern;
+        switch (cmbCond.SelectedIndex)
+        {
+            // を含む
+            case 0:
+                Pattern = "*" + Pattern + "*";
+                break;
+            // から始まる
+            case 2:
+                Pattern = Pattern + "*";
+                break;
+            // で終わる
+            case 3:
+                Pattern = "*" + Pattern;
+                break;
+            // と一致する
+            default:
+                break;
+        }
 
         // 検索条件を保存
-        RegistryKey reg = Registry.CurrentUser.CreateSubKey(SAVEDATA);
-        reg.SetValue("BaseDirectory", this.txtBaseDirectory.Text);
-        reg.SetValue("Pattern", this.txtPattern.Text);
-        reg.SetValue("Depth", txtDepth.Text);
+        reg.SetValue("BaseDirectory", txtBaseDirectory.Text);
+        reg.SetValue("Pattern", txtPattern.Text);
+        reg.SetValue("Depth", int.Parse(txtDepth.Text), RegistryValueKind.DWord);
+        reg.SetValue("ShouldSearchFolder", Bool2Int(chkFolder.Checked), RegistryValueKind.DWord);
+        reg.SetValue("ShouldSearchFile", Bool2Int(chkFile.Checked), RegistryValueKind.DWord);
+        reg.SetValue("ShouldSort", Bool2Int(chkSort.Checked), RegistryValueKind.DWord);
+        reg.SetValue("Wildcard", cmbCond.SelectedIndex, RegistryValueKind.DWord);
 
         // 検索処理を実行。
-        const int BIT_FOLDER = 1;
-        const int BIT_FILE = 2;
         int condition = 0;
-        if (this.chkFolder.Checked) condition += BIT_FOLDER;
-        if (this.chkFile.Checked) condition += BIT_FILE;
+        condition += BIT_FOLDER * Bool2Int(chkFolder.Checked);
+        condition += BIT_FILE * Bool2Int(chkFile.Checked);
+        await Task.Run(() => FindFiles(BaseDirectory, Pattern, Depth, condition));
 
-        this.FindFiles(BaseDirectory, Pattern, Depth, condition);
-
-        if (this.chkSort.Checked) this.SortItem();
+        if (chkSort.Checked) SortItem();
 
         // Finarilze
-        this.progress.Value = 0;
-        this.lblFinish.Text = "検索完了";
-        this.btnSearch.Text = this.btnSearch.Text == "検索" ? "停止" : "検索";
+        SetProgress(0);
+        lblFinish.Text = "検索完了";
+        btnSearch.Text = SwitchString(btnSearch.Text, "検索", "停止");
+    }
+
+    private string SwitchString(string exp, string str1, string str2)
+    {
+        return exp == str1 ? str2 : str1;
+    }
+
+
+    private int Bool2Int(bool b)
+    {
+        return b ? 1 : 0;
+    }
+
+
+    // ファイル検索処理の実装
+    private void FindFiles(string BaseDirectory, string Pattern, int Depth, int condition)
+    {
+        if (Depth <= 0 || cancel == true || condition == 0) return;
+
+        List<string> Queue = new List<string>();
+        List<string> Ret = new List<string>();
+
+        // アクセス権限のないフォルダだとエラーが発生するのでエラーをもみ消す。
+        try
+        {
+            // フォルダを探索キューに追加
+            SetProgress(10);
+            foreach (string folder in Directory.EnumerateDirectories(BaseDirectory)) Queue.Add(folder);
+
+            const int BIT_FOLDER = 1;
+            const int BIT_FILE = 2;
+            SetProgress(33);
+            if ((BIT_FOLDER & condition) != 0)
+                foreach (string folder in Directory.EnumerateDirectories(BaseDirectory, Pattern)) Ret.Add(folder);
+
+            SetProgress(66);
+            if ((BIT_FILE & condition) != 0)
+                foreach (string file in Directory.EnumerateFiles(BaseDirectory, Pattern)) Ret.Add(file);
+        }
+        catch { }
+
+        SetProgress(100);
+        AddRows(Ret);
+
+        if (Queue.Count < 40)
+            foreach (string NextBaseDirectory in Queue) FindFiles(NextBaseDirectory, Pattern, Depth - 1, condition);
+        else
+            Parallel.ForEach(Queue, NextBaseDirectory => FindFiles(NextBaseDirectory, Pattern, Depth - 1, condition));
+    }
+
+    private void AddRows(List<string> items)
+    {
+        if (lvResult.InvokeRequired)
+            lvResult.Invoke(new Action<List<string>>(AddRows), new object[] { items });
+        else
+            foreach (string item in items)
+                lvResult.Rows.Add(new string[] { item });
+    }
+
+    private void SetProgress(int value)
+    {
+        if (progress.InvokeRequired)
+            progress.Invoke(new Action<int>(SetProgress), new object[] { value });
+        else
+            progress.Value = value;
+    }
+
+    private void SortItem()
+    {
+        lvResult.Sort(lvResult.Columns[0], System.ComponentModel.ListSortDirection.Ascending);
+        lvResult.CurrentCell = lvResult[0, 0];
     }
 
     // 検索結果をダブルクリックしたときの処理。アイテムをハイライトした状態でエクスプローラを開く。
     private void lvResult_CellContentDoubleClick(Object sender, DataGridViewCellEventArgs e)
     {
-        try
-        {
-            Process.Start("Explorer", "/select," + this.lvResult.Rows[e.RowIndex].Cells[0].Value.ToString());
-        }
+        try { Process.Start("Explorer", "/select," + lvResult.Rows[e.RowIndex].Cells[0].Value.ToString()); }
         catch { }
     }
 
@@ -305,7 +376,21 @@ public class MainForm : Form
         if (!e.Data.GetDataPresent(DataFormats.FileDrop)) return;
 
         string[] dragFilePathArr = (string[])e.Data.GetData(DataFormats.FileDrop, false);
-        txtBaseDirectory.Text = Program.OriginalPath(dragFilePathArr[0]);
+        txtBaseDirectory.Text = OriginalPath(dragFilePathArr[0]);
+    }
+
+    private string OriginalPath(string PathShortcut)
+    {
+        if (!PathShortcut.EndsWith(".lnk")) return PathShortcut;
+
+        // WshShellを作成
+        Type t = Type.GetTypeFromCLSID(new Guid("72C24DD5-D70A-438B-8A42-98424B88AFB8"));
+        dynamic shell = Activator.CreateInstance(t);
+
+        var shortcut = shell.CreateShortcut(PathShortcut);
+        string TargetPath = shortcut.TargetPath;
+        // ショートカットの先がショートカットだった場合再帰呼び出しする。
+        return TargetPath.EndsWith(".lnk") ? OriginalPath(TargetPath) : TargetPath;
     }
 
     // ドラッグアンドドロップで離す前の処理？よくわからん。
@@ -313,6 +398,7 @@ public class MainForm : Form
     {
         e.Effect = DragDropEffects.All;
     }
+
 
     // テキストボックスでCtrl+Aをした時の処理。
     private void textBox_KeyDown(object sender, KeyEventArgs e)
@@ -347,74 +433,6 @@ public class MainForm : Form
             //描画が完了したことを知らせる
             e.Handled = true;
         }
-    }
-
-    // ファイル検索処理の実装
-    private void FindFiles(string BaseDirectory, string Pattern, int Depth, int condition)
-    {
-        if (Depth <= 0 || this.Cancel == true || condition == 0) return;
-
-        List<string> Queue = new List<string>();
-
-        lock (this.progress) this.progress.Value = 33;
-
-        // アクセス権限のないフォルダだとエラーが発生するのでエラーをもみ消す。
-        try
-        {
-            // フォルダを探索キューに追加
-            foreach (string folder in Directory.EnumerateDirectories(BaseDirectory)) Queue.Add(folder);
-
-            int i = 0;
-            Action<string> AddRow = (item =>
-            {
-                this.lvResult.Rows.Add(new string[] { item });
-
-                if (i++ % 100 == 0)
-                {
-                    this.progress.Value++;
-                    Application.DoEvents();
-                }
-            });
-
-            const int BIT_FOLDER = 1;
-            const int BIT_FILE = 2;
-            if (Convert.ToBoolean(BIT_FOLDER & condition))
-            {
-                foreach (string folder in Directory.EnumerateDirectories(BaseDirectory, Pattern))
-                {
-                    lock (this.lvResult)
-                    {
-                        AddRow(folder);
-                    }
-                }
-            }
-
-            i = 0;
-            if (Convert.ToBoolean(BIT_FILE & condition))
-            {
-                foreach (string file in Directory.EnumerateFiles(BaseDirectory, Pattern))
-                {
-                    lock (this.lvResult)
-                    {
-                        AddRow(file);
-                    }
-                }
-            }
-        }
-        catch { }
-
-        Application.DoEvents();
-
-        if (Queue.Count < 40)
-            foreach (string NextBaseDirectory in Queue) FindFiles(NextBaseDirectory, Pattern, Depth - 1, condition);
-        else
-            Parallel.ForEach(Queue, NextBaseDirectory => FindFiles(NextBaseDirectory, Pattern, Depth - 1, condition));
-    }
-
-    private void SortItem()
-    {
-        this.lvResult.Sort(this.lvResult.Columns[0], System.ComponentModel.ListSortDirection.Ascending);
-        this.lvResult.CurrentCell = this.lvResult[0, 0];
     }
 }
 

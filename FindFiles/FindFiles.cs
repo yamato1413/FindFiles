@@ -1,15 +1,16 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Drawing;
+using System.IO;
+using System.Linq;
+using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Runtime.InteropServices;
-using System.Linq;
-using Microsoft.Win32;
-using System.Diagnostics;
-using System.Text.RegularExpressions;
-using System.IO;
-using System.Collections.Generic;
-using System;
 using System.Windows.Forms;
-using System.Drawing;
+using Microsoft.VisualBasic;
+using Microsoft.Win32;
 
 public class Program
 {
@@ -25,8 +26,21 @@ public class MainForm : Form
     private const string SAVEDATA = @"SOFTWARE\Yamato\FindFiles";
     private RegistryKey reg = Registry.CurrentUser.CreateSubKey(SAVEDATA);
 
-    private const int BIT_FOLDER = 1;
-    private const int BIT_FILE = 2;
+    [Flags]
+    private enum SearchCond
+    {
+        None = 0,       // 0b_00
+        Folders = 1,    // 0b_01
+        Files = 2       // 0b_10
+    }
+
+    private enum Wildcard
+    {
+        Contain,
+        Match,
+        Start,
+        End
+    }
 
     private System.Windows.Forms.Label lblBaseDirectory = new System.Windows.Forms.Label();
     private System.Windows.Forms.Label lblPattern = new System.Windows.Forms.Label();
@@ -48,13 +62,14 @@ public class MainForm : Form
     private DataGridView lvResult = new DataGridView();
     private ProgressBar progress = new ProgressBar();
 
-    private int heightControls = 25;
-    private int leftControls = 20;
-    private int topBaseDirectory = 30;
-    private int topSearchCond = 90;
-    private int topResult = 150;
+    private const int heightControls = 25;
+    private const int leftControls = 20;
+    private const int topBaseDirectory = 30;
+    private const int topSearchCond = 90;
+    private const int topResult = 150;
 
     private bool cancel = false;
+    private string baseDir;
 
     public MainForm()
     {
@@ -70,12 +85,15 @@ public class MainForm : Form
         this.MinimumSize = new Size(400, 250);
         this.Text = "フォルダ・ファイル検索 - ISHII_Tools";
         this.AllowDrop = true;
-        // フォームを閉じるときに位置とサイズを記録する
+        // フォームを閉じるときに位置とサイズをレジストリに記録する
         this.Closing += ((object sender, System.ComponentModel.CancelEventArgs e) =>
         {
-            pos = new int[] { Left, Top, Width, Height }.Select(x => x < 0 ? 0 : x).ToArray();
+            pos = new int[] { Left, Top, Width, Height }
+                    .Select(x => x < 0 ? 0 : x)
+                    .ToArray();
             reg.SetValue("Position", string.Join(" ", pos.Select(x => x.ToString())));
         });
+        this.Activated += ((object sender, EventArgs e) => txtPattern.Focus());
 
         // コントロールの初期化
         InitBaseDirectory();
@@ -86,7 +104,7 @@ public class MainForm : Form
     private void InitBaseDirectory()
     {
         lblBaseDirectory.Location = new Point(leftControls, topBaseDirectory - 20);
-        lblBaseDirectory.Size = new Size(370, 18);     // 文字数ベースなのでマジックナンバーでよい
+        lblBaseDirectory.AutoSize = true;
         lblBaseDirectory.Text = "探索開始フォルダ(フォルダをドラッグ&ドロップで指定可)";
         lblBaseDirectory.Font = new Font(new FontFamily("BIZ UDゴシック"), 10);
         Controls.Add(lblBaseDirectory);
@@ -97,8 +115,8 @@ public class MainForm : Form
         txtBaseDirectory.BorderStyle = BorderStyle.FixedSingle;
         txtBaseDirectory.AllowDrop = true;
         txtBaseDirectory.DragDrop += txtBaseDirectory_DragDrop;
-        txtBaseDirectory.DragEnter += txtBaseDirectory_DragEnter;
-        txtBaseDirectory.KeyDown += textBox_KeyDown;
+        txtBaseDirectory.DragEnter += ((object sender, DragEventArgs e) => e.Effect = DragDropEffects.All);
+        txtBaseDirectory.KeyDown += SelectAllText;
         txtBaseDirectory.Anchor = (AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right);
         txtBaseDirectory.Font = new Font(new FontFamily("BIZ UDゴシック"), 12);
         txtBaseDirectory.Text = reg.GetValue("BaseDirectory", @"C:\").ToString();
@@ -108,7 +126,7 @@ public class MainForm : Form
         btnDirectory.Size = new Size(30, heightControls);
         btnDirectory.Text = "..";
         btnDirectory.Anchor = (AnchorStyles.Top | AnchorStyles.Right);
-        btnDirectory.Click += btnDirectory_Click;
+        btnDirectory.Click += SelectDirectory;
         btnDirectory.Font = new Font(new FontFamily("BIZ UDゴシック"), 12);
         Controls.Add(btnDirectory);
     }
@@ -116,30 +134,30 @@ public class MainForm : Form
     private void InitSearchCond()
     {
         lblPattern.Location = new Point(leftControls, topSearchCond - 20);
-        lblPattern.Size = new Size(60, 18);
+        lblPattern.AutoSize = true;
         lblPattern.Text = "検索条件";
         lblPattern.Font = new Font(new FontFamily("BIZ UDゴシック"), 10);
         Controls.Add(lblPattern);
 
         chkFolder.Location = new Point(lblPattern.Right, topSearchCond - 20);
-        chkFolder.Size = new Size(80, 18);
+        chkFolder.AutoSize = true;
         chkFolder.Text = "フォルダ";
         chkFolder.Font = new Font(new FontFamily("BIZ UDゴシック"), 10);
         chkFolder.Checked = Convert.ToBoolean(reg.GetValue("ShouldSearchFolder", 1));
         Controls.Add(chkFolder);
 
         chkFile.Location = new Point(chkFolder.Right, topSearchCond - 20);
-        chkFile.Size = new Size(80, 18);
+        chkFile.AutoSize = true;
         chkFile.Text = "ファイル";
         chkFile.Font = new Font(new FontFamily("BIZ UDゴシック"), 10);
         chkFile.Checked = Convert.ToBoolean(reg.GetValue("ShouldSearchFile", 1));
         Controls.Add(chkFile);
 
         chkSort.Location = new Point(chkFile.Right, topSearchCond - 20);
-        chkSort.Size = new Size(160, 18);
+        chkSort.AutoSize = true;
         chkSort.Text = "検索終了後にソート";
         chkSort.Font = new Font(new FontFamily("BIZ UDゴシック"), 10);
-        chkSort.Checked = Convert.ToBoolean(reg.GetValue("ShouldSort", 0));
+        chkSort.Checked = Convert.ToBoolean(reg.GetValue("ShouldSort", 1));
         Controls.Add(chkSort);
 
         txtPattern.AutoSize = false;
@@ -149,7 +167,7 @@ public class MainForm : Form
         txtPattern.Anchor = (AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right);
         txtPattern.Font = new Font(new FontFamily("BIZ UDゴシック"), 12);
         txtPattern.Text = reg.GetValue("Pattern", "").ToString();
-        txtPattern.KeyDown += textBox_KeyDown;
+        txtPattern.KeyDown += SelectAllText;
         Controls.Add(txtPattern);
 
         cmbCond.Location = new Point(txtPattern.Right + 5, topSearchCond);
@@ -164,7 +182,7 @@ public class MainForm : Form
         Controls.Add(cmbCond);
 
         lblDepth.Location = new Point(cmbCond.Right + 5, topSearchCond - 20);
-        lblDepth.Size = new Size(100, 18);
+        lblDepth.AutoSize = true;
         lblDepth.Text = "探索する深さ";
         lblDepth.Anchor = (AnchorStyles.Top | AnchorStyles.Right);
         lblDepth.Font = new Font(new FontFamily("BIZ UDゴシック"), 10);
@@ -177,7 +195,8 @@ public class MainForm : Form
         txtDepth.Anchor = (AnchorStyles.Top | AnchorStyles.Right);
         txtDepth.Font = new Font(new FontFamily("BIZ UDゴシック"), 12);
         txtDepth.Text = reg.GetValue("Depth", 1).ToString();
-        txtDepth.KeyDown += textBox_KeyDown;
+        txtDepth.KeyDown += SelectAllText;
+        txtDepth.TextChanged += ((object sender, EventArgs e) => txtDepth.Text = Strings.StrConv(txtDepth.Text, VbStrConv.Narrow));
         Controls.Add(txtDepth);
 
         btnSearch.Location = new Point(txtDepth.Right + 10, topSearchCond - 1);
@@ -201,7 +220,11 @@ public class MainForm : Form
         lvResult.Columns[0].Name = "結果一覧";
         lvResult.Columns[0].MinimumWidth = 2400;
         lvResult.Columns[0].AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
-        lvResult.CellContentDoubleClick += lvResult_CellContentDoubleClick;
+        lvResult.CellContentDoubleClick += ((Object sender, DataGridViewCellEventArgs e) =>
+        {
+            try { Process.Start("Explorer", "/select," + this.baseDir + lvResult.Rows[e.RowIndex].Cells[0].Value.ToString()); }
+            catch { }
+        });
         lvResult.CellPainting += lvResult_CellPainting;
         lvResult.AllowUserToAddRows = false;
         lvResult.AllowUserToDeleteRows = false;
@@ -214,23 +237,25 @@ public class MainForm : Form
         Controls.Add(progress);
 
         lblFinish.Location = new Point(leftControls + 150, 130);
-        lblFinish.Size = new Size(80, 20);
+        lblFinish.AutoSize = true;
         lblFinish.Text = "";
         lblFinish.Anchor = (AnchorStyles.Top | AnchorStyles.Left);
         lblFinish.Font = new Font(new FontFamily("BIZ UDゴシック"), 9);
         Controls.Add(lblFinish);
     }
 
-    // イベント処理
-    // ディレクトリボタン。フォルダ選択ダイアログを表示する
-    private void btnDirectory_Click(object sender, EventArgs e)
+    /// <summary>
+    /// フォルダ選択ダイアログを表示する。
+    /// </summary>
+    private void SelectDirectory(object sender, EventArgs e)
     {
         FolderSelectDialog dialog = new FolderSelectDialog();
-        if (dialog.ShowDialog() == DialogResult.OK)
-            txtBaseDirectory.Text = dialog.Path;
+        if (dialog.ShowDialog() == DialogResult.OK) txtBaseDirectory.Text = dialog.Path;
     }
 
-    // 検索ボタン。検索を実行する。
+    /// <summary>
+    /// 検索を実行する。
+    /// </summary>
     private async void btnSearch_Click(object sender, EventArgs e)
     {
         if (btnSearch.Text == "停止")
@@ -246,100 +271,105 @@ public class MainForm : Form
         btnSearch.Text = SwitchString(btnSearch.Text, "検索", "停止");
 
         // 検索条件の取り込み
-        string BaseDirectory = txtBaseDirectory.Text == "" ? @"C:\" : txtBaseDirectory.Text;
-        string Pattern = txtPattern.Text == "" ? "*" : txtPattern.Text;
-        int Depth = txtDepth.Text == "" ? 0 : int.Parse(txtDepth.Text);
+        this.baseDir = txtBaseDirectory.Text == "" ? @"C:\" : txtBaseDirectory.Text;
+        string pattern = txtPattern.Text == "" ? "*" : txtPattern.Text;
+        int depth = txtDepth.Text == "" ? 1 : int.Parse(txtDepth.Text);
 
-        switch (cmbCond.SelectedIndex)
-        {
-            // を含む
-            case 0:
-                Pattern = "*" + Pattern + "*";
-                break;
-            // から始まる
-            case 2:
-                Pattern = Pattern + "*";
-                break;
-            // で終わる
-            case 3:
-                Pattern = "*" + Pattern;
-                break;
-            // と一致する
-            default:
-                break;
-        }
+        Wildcard wc = (Wildcard)cmbCond.SelectedIndex;
+        if (wc == Wildcard.Contain || wc == Wildcard.End) pattern = "*" + pattern;
+        if (wc == Wildcard.Contain || wc == Wildcard.Start) pattern = pattern + "*";
 
         // 検索条件を保存
         reg.SetValue("BaseDirectory", txtBaseDirectory.Text);
         reg.SetValue("Pattern", txtPattern.Text);
-        reg.SetValue("Depth", int.Parse(txtDepth.Text), RegistryValueKind.DWord);
+        reg.SetValue("Depth", depth, RegistryValueKind.DWord);
         reg.SetValue("ShouldSearchFolder", Bool2Int(chkFolder.Checked), RegistryValueKind.DWord);
         reg.SetValue("ShouldSearchFile", Bool2Int(chkFile.Checked), RegistryValueKind.DWord);
         reg.SetValue("ShouldSort", Bool2Int(chkSort.Checked), RegistryValueKind.DWord);
         reg.SetValue("Wildcard", cmbCond.SelectedIndex, RegistryValueKind.DWord);
 
         // 検索処理を実行。
-        int condition = 0;
-        condition += BIT_FOLDER * Bool2Int(chkFolder.Checked);
-        condition += BIT_FILE * Bool2Int(chkFile.Checked);
-        await Task.Run(() => FindFiles(BaseDirectory, Pattern, Depth, condition));
+        SearchCond condition = (chkFolder.Checked ? SearchCond.Folders : SearchCond.None) |
+                               (chkFile.Checked ? SearchCond.Files : SearchCond.None);
+        await Task.Run(() => FindFiles(this.baseDir, this.baseDir, pattern, depth, condition));
 
         if (chkSort.Checked) SortItem();
 
-        // Finarilze
+        // Finalize
         SetProgress(0);
         lblFinish.Text = "検索完了";
         btnSearch.Text = SwitchString(btnSearch.Text, "検索", "停止");
     }
 
+    /// <summary>
+    /// 入力された文字列と異なる方の文字列を返却する。
+    /// str1,str2のどちらでもない場合は""を返却する。
+    /// </summary>
+    /// <param name="exp">入力</param>
+    /// <param name="str1">返却したい文字列1</param>
+    /// <param name="str2">返却したい文字列2</param>
+    /// <returns>str1 => str2, str2 => str1, _ => ""</returns>
     private string SwitchString(string exp, string str1, string str2)
     {
-        return exp == str1 ? str2 : str1;
+        if (exp == str1) return str2;
+        else if (exp == str2) return str1;
+        else return "";
     }
 
-
+    /// <summary>
+    /// booleanを[1,0]に変換する。
+    /// </summary>
+    /// <param name="b">真偽値</param>
+    /// <returns>true => 1, false => 0</returns>
     private int Bool2Int(bool b)
     {
         return b ? 1 : 0;
     }
 
-
-    // ファイル検索処理の実装
-    private void FindFiles(string BaseDirectory, string Pattern, int Depth, int condition)
+    /// <summary>
+    /// ファイル検索処理の実装
+    /// </summary>
+    /// <param name="baseDirectory">おおもとのディレクトリ</param>
+    ///  <param name="searchDirectory">検索したいディレクトリ</param>
+    /// <param name="pattern">検索したい文字列</param>
+    /// <param name="depth">ディレクトリを何段潜って検索するか</param>
+    /// <param name="condition">フォルダ・ファイルを検索するかどうかの条件</param>
+    private void FindFiles(string baseDirectory, string searchDirectory, string pattern, int depth, SearchCond condition)
     {
-        if (Depth <= 0 || cancel == true || condition == 0) return;
+        if (depth <= 0 || cancel || condition == SearchCond.None) return;
 
-        List<string> Queue = new List<string>();
-        List<string> Ret = new List<string>();
+        List<string> queue = new List<string>();
+        List<string> ret = new List<string>();
 
         // アクセス権限のないフォルダだとエラーが発生するのでエラーをもみ消す。
         try
         {
             // フォルダを探索キューに追加
             SetProgress(10);
-            foreach (string folder in Directory.EnumerateDirectories(BaseDirectory)) Queue.Add(folder);
+            foreach (string folder in Directory.EnumerateDirectories(searchDirectory)) queue.Add(folder);
 
-            const int BIT_FOLDER = 1;
-            const int BIT_FILE = 2;
+            // 条件に合うフォルダを検索結果リストに積む
             SetProgress(33);
-            if ((BIT_FOLDER & condition) != 0)
-                foreach (string folder in Directory.EnumerateDirectories(BaseDirectory, Pattern)) Ret.Add(folder);
+            if ((SearchCond.Folders & condition) != SearchCond.None)
+                foreach (string folder in Directory.EnumerateDirectories(searchDirectory, pattern)) ret.Add(folder.Replace(baseDirectory, ""));
 
+            // 条件に合うファイルを検索結果リストに積む
             SetProgress(66);
-            if ((BIT_FILE & condition) != 0)
-                foreach (string file in Directory.EnumerateFiles(BaseDirectory, Pattern)) Ret.Add(file);
+            if ((SearchCond.Files & condition) != SearchCond.None)
+                foreach (string file in Directory.EnumerateFiles(searchDirectory, pattern)) ret.Add(file.Replace(baseDirectory, ""));
         }
         catch { }
 
         SetProgress(100);
-        AddRows(Ret);
+        AddRows(ret);
 
-        if (Queue.Count < 40)
-            foreach (string NextBaseDirectory in Queue) FindFiles(NextBaseDirectory, Pattern, Depth - 1, condition);
-        else
-            Parallel.ForEach(Queue, NextBaseDirectory => FindFiles(NextBaseDirectory, Pattern, Depth - 1, condition));
+        Parallel.ForEach(queue, nextBaseDirectory => FindFiles(baseDirectory, nextBaseDirectory, pattern, depth - 1, condition));
     }
 
+    /// <summary>
+    /// 検索結果をUIに反映する。
+    /// </summary>
+    /// <param name="items">検索結果のリスト</param>
     private void AddRows(List<string> items)
     {
         if (lvResult.InvokeRequired)
@@ -349,28 +379,48 @@ public class MainForm : Form
                 lvResult.Rows.Add(new string[] { item });
     }
 
+    /// <summary>
+    /// 進捗状況をプログレスバーに反映する。
+    /// </summary>
+    /// <param name="value">プログレスバーに設定したい値</param>
     private void SetProgress(int value)
     {
         if (progress.InvokeRequired)
+        {
             progress.Invoke(new Action<int>(SetProgress), new object[] { value });
+        }
         else
-            progress.Value = value;
+        {
+            // 等価なはずだが、なぜか
+            // if (value != 0 && value != 100)
+            // だと、意図通りに動かなかった
+            if (value == 0 || value == 100)
+            {
+                progress.Value = value;
+            }
+            else
+            {
+                value = new Random().Next(value - 5, value + 5);
+                value = value < 0 ? 0 : value;
+                value = value > 100 ? 100 : value;
+                progress.Value = value;
+            }
+        }
     }
 
+    /// <summary>
+    /// 検索結果一覧をソートする。
+    /// </summary>
     private void SortItem()
     {
+        if (lvResult.Rows.Count == 0) return;
         lvResult.Sort(lvResult.Columns[0], System.ComponentModel.ListSortDirection.Ascending);
         lvResult.CurrentCell = lvResult[0, 0];
     }
 
-    // 検索結果をダブルクリックしたときの処理。アイテムをハイライトした状態でエクスプローラを開く。
-    private void lvResult_CellContentDoubleClick(Object sender, DataGridViewCellEventArgs e)
-    {
-        try { Process.Start("Explorer", "/select," + lvResult.Rows[e.RowIndex].Cells[0].Value.ToString()); }
-        catch { }
-    }
-
-    // 基準ディレクトリのテキストボックスにファルダをドラッグアンドドロップしたときの処理。
+    /// <summary>
+    /// ファルダをドラッグアンドドロップしたときの処理。
+    /// </summary>
     private void txtBaseDirectory_DragDrop(object sender, DragEventArgs e)
     {
         if (!e.Data.GetDataPresent(DataFormats.FileDrop)) return;
@@ -379,38 +429,41 @@ public class MainForm : Form
         txtBaseDirectory.Text = OriginalPath(dragFilePathArr[0]);
     }
 
-    private string OriginalPath(string PathShortcut)
+    /// <summary>
+    /// ショートカットから参照パスを取得する。
+    /// ショートカットの先がショートカットだった場合再帰する。
+    /// </summary>
+    /// <param name="shortcutPath">ショートカットのパス</param>
+    /// <returns>ショートカットがさしている先のパス</returns>
+    private string OriginalPath(string shortcutPath)
     {
-        if (!PathShortcut.EndsWith(".lnk")) return PathShortcut;
+        if (!shortcutPath.EndsWith(".lnk")) return shortcutPath;
 
         // WshShellを作成
         Type t = Type.GetTypeFromCLSID(new Guid("72C24DD5-D70A-438B-8A42-98424B88AFB8"));
         dynamic shell = Activator.CreateInstance(t);
 
-        var shortcut = shell.CreateShortcut(PathShortcut);
-        string TargetPath = shortcut.TargetPath;
+        var shortcut = shell.CreateShortcut(shortcutPath);
+        string targetPath = shortcut.targetPath;
         // ショートカットの先がショートカットだった場合再帰呼び出しする。
-        return TargetPath.EndsWith(".lnk") ? OriginalPath(TargetPath) : TargetPath;
+        return targetPath.EndsWith(".lnk") ? OriginalPath(targetPath) : targetPath;
     }
 
-    // ドラッグアンドドロップで離す前の処理？よくわからん。
-    private void txtBaseDirectory_DragEnter(object sender, DragEventArgs e)
-    {
-        e.Effect = DragDropEffects.All;
-    }
-
-
-    // テキストボックスでCtrl+Aをした時の処理。
-    private void textBox_KeyDown(object sender, KeyEventArgs e)
+    /// <summary>
+    /// テキストボックス内でCtrl+Aしたときの処理。
+    /// </summary>
+    private void SelectAllText(object sender, KeyEventArgs e)
     {
         if (e.Control && e.KeyCode == Keys.A)
         {
-            TextBox txt = (TextBox)sender;
-            txt.SelectAll();
+            TextBox txtbox = (TextBox)sender;
+            txtbox.SelectAll();
         }
     }
 
-    // 結果一覧に連番を振る処理。よくわからん。
+    /// <summary>
+    /// 結果一覧に連番を振る処理。ネットで拾ってきた。
+    /// </summary>
     private void lvResult_CellPainting(object sender, DataGridViewCellPaintingEventArgs e)
     {
         //列ヘッダーかどうか調べる
@@ -436,9 +489,32 @@ public class MainForm : Form
     }
 }
 
-// フォルダ選択ダイアログボックス
-// Qiitaより拾ってきた
-// https://qiita.com/otagaisama-1/items/b0804b9d6d37d82950f7
+class FoundItem
+{
+    enum Attributes
+    {
+        File,
+        Folder,
+    }
+    private Attributes _attribute;
+    private string _path;
+
+    public Attributes Attribute { get { return _attribute; } }
+    public string Path { get { return _path; } }
+
+    public FoundItem(Attributes Attribute, string Path)
+    {
+        FoundItem fi = new FoundItem();
+        fi._attribute = Attribute;
+        fi._path = Path;
+    }
+}
+
+/// <summary>
+/// フォルダ選択ダイアログボックス
+/// Qiitaより拾ってきた
+/// https://qiita.com/otagaisama-1/items/b0804b9d6d37d82950f7
+/// </summary>
 public class FolderSelectDialog
 {
     public string Path { get; set; }

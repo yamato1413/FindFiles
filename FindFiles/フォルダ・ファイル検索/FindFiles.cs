@@ -4,7 +4,11 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Net.Configuration;
+using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.WindowsRuntime;
+using System.Runtime.Remoting.Lifetime;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -21,10 +25,9 @@ public class Program
     }
 }
 
-public class MainForm : Form
+class MainForm : Form
 {
-    private const string SAVEDATA = @"SOFTWARE\Yamato\FindFiles";
-    private RegistryKey reg = Registry.CurrentUser.CreateSubKey(SAVEDATA);
+    private RegistryKey reg = Registry.CurrentUser.CreateSubKey(@"SOFTWARE\Yamato\FindFiles");
 
     [Flags]
     private enum SearchCond
@@ -73,32 +76,32 @@ public class MainForm : Form
 
     public MainForm()
     {
-        // フォームの初期化
-        int[] pos = reg.GetValue("Position", "30 30 600 500")
-                       .ToString()
-                       .Split(' ')
-                       .Select(x => int.Parse(x))
-                       .ToArray();
-        this.StartPosition = FormStartPosition.Manual;
-        this.Location = new Point(pos[0], pos[1]);
-        this.Size = new Size(pos[2], pos[3]);
-        this.MinimumSize = new Size(400, 250);
-        this.Text = "フォルダ・ファイル検索 - ISHII_Tools";
-        this.AllowDrop = true;
-        // フォームを閉じるときに位置とサイズをレジストリに記録する
-        this.Closing += ((object sender, System.ComponentModel.CancelEventArgs e) =>
-        {
-            pos = new int[] { Left, Top, Width, Height }.Select(x => x < 0 ? 0 : x).ToArray();
-            reg.SetValue("Position", string.Join(" ", pos.Select(x => x.ToString())));
-        });
-
-        // コントロールの初期化
-        InitBaseDirectory();
+        initFormWindow();
+        initBaseDirectory();
         InitSearchCond();
         InitResult();
     }
 
-    private void InitBaseDirectory()
+    private void initFormWindow()
+    {
+        WindowPos pos = SaveData.WindowPosition;
+        this.StartPosition = FormStartPosition.Manual;
+        this.Location = new Pointer(pos.Left, pos.Top);
+        this.Size = new Size(pos.Width, pos.Height);
+        this.MinimumSize = new Size(400, 250);
+
+        // フォームを閉じるときに位置とサイズを記録する
+        this.Closing += ((object sender, System.ComponentModel.CancelEventArgs e) =>
+        {
+            SaveData.WindowPosition = new WindowPos(this.Top, this.Left, this.Width, this.Height);
+        });
+
+        this.Text = "フォルダ・ファイル検索 - ISHII_Tools";
+        this.AllowDrop = true;
+        this.Activated += ((object sender, EventArgs e) => txtPattern.Focus());
+    }
+
+    private void initBaseDirectory()
     {
         lblBaseDirectory.Location = new Point(leftControls, topBaseDirectory - 20);
         lblBaseDirectory.AutoSize = true;
@@ -154,7 +157,7 @@ public class MainForm : Form
         chkSort.AutoSize = true;
         chkSort.Text = "検索終了後にソート";
         chkSort.Font = new Font(new FontFamily("BIZ UDゴシック"), 10);
-        chkSort.Checked = Convert.ToBoolean(reg.GetValue("ShouldSort", 0));
+        chkSort.Checked = Convert.ToBoolean(reg.GetValue("ShouldSort", 1));
         Controls.Add(chkSort);
 
         txtPattern.AutoSize = false;
@@ -360,10 +363,7 @@ public class MainForm : Form
         SetProgress(100);
         AddRows(ret);
 
-        if (queue.Count < 40)
-            foreach (string nextBaseDirectory in queue) FindFiles(baseDirectory, nextBaseDirectory, pattern, depth - 1, condition);
-        else
-            Parallel.ForEach(queue, nextBaseDirectory => FindFiles(baseDirectory, nextBaseDirectory, pattern, depth - 1, condition));
+        Parallel.ForEach(queue, nextBaseDirectory => FindFiles(baseDirectory, nextBaseDirectory, pattern, depth - 1, condition));
     }
 
     /// <summary>
@@ -489,6 +489,92 @@ public class MainForm : Form
     }
 }
 
+class WindowPos
+{
+    private int top, left, width, height;
+    public WindowPos(int top, int left, int width, int height)
+    {
+        this.top = top < 0 ? 0 : top;
+        this.left = left < 0 ? 0 : left;
+        this.width = width;
+        this.height = height;
+    }
+
+    public int Top { get { return top; } }
+    public int Left { get { return left; } }
+    public int Width { get { return width; } }
+    public int Height { get { return height; } }
+}
+
+class SearchCondition
+{
+    void hoge()
+    {
+        // 検索条件の取り込み
+        this.baseDir = txtBaseDirectory.Text == "" ? @"C:\" : txtBaseDirectory.Text;
+        string pattern = txtPattern.Text == "" ? "*" : txtPattern.Text;
+        int depth = txtDepth.Text == "" ? 1 : int.Parse(txtDepth.Text);
+
+        Wildcard wc = (Wildcard)cmbCond.SelectedIndex;
+        if (wc == Wildcard.Contain || wc == Wildcard.End) pattern = "*" + pattern;
+        if (wc == Wildcard.Contain || wc == Wildcard.Start) pattern = pattern + "*";
+
+        // 検索条件を保存
+        reg.SetValue("BaseDirectory", txtBaseDirectory.Text);
+        reg.SetValue("Pattern", txtPattern.Text);
+        reg.SetValue("Depth", depth, RegistryValueKind.DWord);
+        reg.SetValue("ShouldSearchFolder", Bool2Int(chkFolder.Checked), RegistryValueKind.DWord);
+        reg.SetValue("ShouldSearchFile", Bool2Int(chkFile.Checked), RegistryValueKind.DWord);
+        reg.SetValue("ShouldSort", Bool2Int(chkSort.Checked), RegistryValueKind.DWord);
+        reg.SetValue("Wildcard", cmbCond.SelectedIndex, RegistryValueKind.DWord);
+
+        // 検索処理を実行。
+        SearchCond condition = (chkFolder.Checked ? SearchCond.Folders : SearchCond.None) |
+                               (chkFile.Checked ? SearchCond.Files : SearchCond.None);
+        await Task.Run(() => FindFiles(this.baseDir, this.baseDir, pattern, depth, condition));
+    }
+
+}
+
+class SaveData
+{
+    private const string DEFAULT_POSITION = "30 30 600 500";
+    private RegistryKey key = Registry.CurrentUser.CreateSubKey(@"SOFTWARE\Yamato\FindFiles");
+    public static WindowPos WindowPosition
+    {
+        get
+        {
+            int[] pos = new SaveData().key.GetValue("Position", DEFAULT_POSITION).ToString().Split(' ').Select(x => int.Parse(x)).ToArray();
+            return new WindowPos(pos[0], pos[1], pos[2], pos[3]);
+        }
+        set
+        {
+            string pos = String.Join(" ", new int[] { value.Top, value.Left, value.Width, value.Height }.Select(x => x.ToString()));
+            new SaveData().key.SetValue("Position", pos);
+        }
+    }
+}
+
+// class FoundItem
+// {
+//     enum Attributes
+//     {
+//         File,
+//         Folder,
+//     }
+//     private Attributes _attribute;
+//     private string _path;
+
+//     public Attributes Attribute { get { return _attribute; } }
+//     public string Path { get { return _path; } }
+
+//     public FoundItem(Attributes Attribute, string Path)
+//     {
+//         FoundItem fi = new FoundItem();
+//         fi._attribute = Attribute;
+//         fi._path = Path;
+//     }
+// }
 
 /// <summary>
 /// フォルダ選択ダイアログボックス

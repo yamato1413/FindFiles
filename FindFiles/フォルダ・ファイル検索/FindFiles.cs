@@ -5,7 +5,6 @@ using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Net.Configuration;
-using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.WindowsRuntime;
 using System.Runtime.Remoting.Lifetime;
@@ -27,31 +26,14 @@ public class Program
 
 class MainForm : Form
 {
-    private RegistryKey reg = Registry.CurrentUser.CreateSubKey(@"SOFTWARE\Yamato\FindFiles");
-
-    [Flags]
-    private enum SearchCond
-    {
-        None = 0,       // 0b_00
-        Folders = 1,    // 0b_01
-        Files = 2       // 0b_10
-    }
-
-    private enum Wildcard
-    {
-        Contain,
-        Match,
-        Start,
-        End
-    }
 
     private System.Windows.Forms.Label lblBaseDirectory = new System.Windows.Forms.Label();
-    private System.Windows.Forms.Label lblPattern = new System.Windows.Forms.Label();
+    private System.Windows.Forms.Label lblKeyword = new System.Windows.Forms.Label();
     private System.Windows.Forms.Label lblDepth = new System.Windows.Forms.Label();
     private System.Windows.Forms.Label lblFinish = new System.Windows.Forms.Label();
 
     private TextBox txtBaseDirectory = new TextBox();
-    private TextBox txtPattern = new TextBox();
+    private TextBox txtKeyword = new TextBox();
     private TextBox txtDepth = new TextBox();
 
     private Button btnDirectory = new Button();
@@ -61,7 +43,7 @@ class MainForm : Form
     private CheckBox chkFile = new CheckBox();
     private CheckBox chkSort = new CheckBox();
 
-    private ComboBox cmbCond = new ComboBox();
+    private ComboBox cmbWildcard = new ComboBox();
     private DataGridView lvResult = new DataGridView();
     private ProgressBar progress = new ProgressBar();
 
@@ -72,21 +54,36 @@ class MainForm : Form
     private const int topResult = 150;
 
     private bool cancel = false;
-    private string baseDir;
 
     public MainForm()
     {
-        initFormWindow();
-        initBaseDirectory();
-        InitSearchCond();
-        InitResult();
+        init_FormWindow();
+
+        init_lblBaseDirectory();
+        init_txtBaseDirectory();
+        init_btnDirectory();
+        init_lblKeyword();
+        init_chkFolder();
+        init_chkFile();
+        init_chkSort();
+        init_txtKeyword();
+        init_cmbWildcard();
+        init_lblDepth();
+        init_txtDepth();
+        init_btnSearch();
+        init_lvResult();
+        init_lblFinish();
+        init_progress();
+
+        load_SaveData();
+
     }
 
-    private void initFormWindow()
+    private void init_FormWindow()
     {
         WindowPos pos = SaveData.WindowPosition;
         this.StartPosition = FormStartPosition.Manual;
-        this.Location = new Pointer(pos.Left, pos.Top);
+        this.Location = new Point(pos.Left, pos.Top);
         this.Size = new Size(pos.Width, pos.Height);
         this.MinimumSize = new Size(400, 250);
 
@@ -98,17 +95,20 @@ class MainForm : Form
 
         this.Text = "フォルダ・ファイル検索 - ISHII_Tools";
         this.AllowDrop = true;
-        this.Activated += ((object sender, EventArgs e) => txtPattern.Focus());
+        this.Shown += ((object sender, EventArgs e) => txtKeyword.Focus());
     }
 
-    private void initBaseDirectory()
+    private void init_lblBaseDirectory()
     {
         lblBaseDirectory.Location = new Point(leftControls, topBaseDirectory - 20);
         lblBaseDirectory.AutoSize = true;
         lblBaseDirectory.Text = "探索開始フォルダ(フォルダをドラッグ&ドロップで指定可)";
         lblBaseDirectory.Font = new Font(new FontFamily("BIZ UDゴシック"), 10);
         Controls.Add(lblBaseDirectory);
+    }
 
+    private void init_txtBaseDirectory()
+    {
         txtBaseDirectory.AutoSize = false;
         txtBaseDirectory.Location = new Point(leftControls, topBaseDirectory);
         txtBaseDirectory.Size = new Size(Width - 100, heightControls);
@@ -119,9 +119,11 @@ class MainForm : Form
         txtBaseDirectory.KeyDown += SelectAllText;
         txtBaseDirectory.Anchor = (AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right);
         txtBaseDirectory.Font = new Font(new FontFamily("BIZ UDゴシック"), 12);
-        txtBaseDirectory.Text = reg.GetValue("BaseDirectory", @"C:\").ToString();
         Controls.Add(txtBaseDirectory);
+    }
 
+    private void init_btnDirectory()
+    {
         btnDirectory.Location = new Point(txtBaseDirectory.Right + 10, topBaseDirectory);
         btnDirectory.Size = new Size(30, heightControls);
         btnDirectory.Text = "..";
@@ -131,74 +133,92 @@ class MainForm : Form
         Controls.Add(btnDirectory);
     }
 
-    private void InitSearchCond()
+    private void init_lblKeyword()
     {
-        lblPattern.Location = new Point(leftControls, topSearchCond - 20);
-        lblPattern.AutoSize = true;
-        lblPattern.Text = "検索条件";
-        lblPattern.Font = new Font(new FontFamily("BIZ UDゴシック"), 10);
-        Controls.Add(lblPattern);
+        lblKeyword.Location = new Point(leftControls, topSearchCond - 20);
+        lblKeyword.AutoSize = true;
+        lblKeyword.Text = "検索条件";
+        lblKeyword.Font = new Font(new FontFamily("BIZ UDゴシック"), 10);
+        Controls.Add(lblKeyword);
+    }
 
-        chkFolder.Location = new Point(lblPattern.Right, topSearchCond - 20);
+    private void init_chkFolder()
+    {
+        chkFolder.Location = new Point(lblKeyword.Right, topSearchCond - 20);
         chkFolder.AutoSize = true;
         chkFolder.Text = "フォルダ";
         chkFolder.Font = new Font(new FontFamily("BIZ UDゴシック"), 10);
-        chkFolder.Checked = Convert.ToBoolean(reg.GetValue("ShouldSearchFolder", 1));
         Controls.Add(chkFolder);
+    }
 
+    private void init_chkFile()
+    {
         chkFile.Location = new Point(chkFolder.Right, topSearchCond - 20);
         chkFile.AutoSize = true;
         chkFile.Text = "ファイル";
         chkFile.Font = new Font(new FontFamily("BIZ UDゴシック"), 10);
-        chkFile.Checked = Convert.ToBoolean(reg.GetValue("ShouldSearchFile", 1));
         Controls.Add(chkFile);
+    }
 
+    private void init_chkSort()
+    {
         chkSort.Location = new Point(chkFile.Right, topSearchCond - 20);
         chkSort.AutoSize = true;
         chkSort.Text = "検索終了後にソート";
         chkSort.Font = new Font(new FontFamily("BIZ UDゴシック"), 10);
-        chkSort.Checked = Convert.ToBoolean(reg.GetValue("ShouldSort", 1));
         Controls.Add(chkSort);
+    }
 
-        txtPattern.AutoSize = false;
-        txtPattern.Location = new Point(leftControls, topSearchCond);
-        txtPattern.Size = new Size(Width - 350, heightControls);
-        txtPattern.BorderStyle = BorderStyle.FixedSingle;
-        txtPattern.Anchor = (AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right);
-        txtPattern.Font = new Font(new FontFamily("BIZ UDゴシック"), 12);
-        txtPattern.Text = reg.GetValue("Pattern", "").ToString();
-        txtPattern.KeyDown += SelectAllText;
-        Controls.Add(txtPattern);
+    private void init_txtKeyword()
+    {
+        txtKeyword.AutoSize = false;
+        txtKeyword.Location = new Point(leftControls, topSearchCond);
+        txtKeyword.Size = new Size(Width - 350, heightControls);
+        txtKeyword.BorderStyle = BorderStyle.FixedSingle;
+        txtKeyword.Anchor = (AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right);
+        txtKeyword.Font = new Font(new FontFamily("BIZ UDゴシック"), 12);
+        txtKeyword.KeyDown += SelectAllText;
+        Controls.Add(txtKeyword);
+    }
 
-        cmbCond.Location = new Point(txtPattern.Right + 5, topSearchCond);
-        cmbCond.Size = new Size(120, heightControls);
-        cmbCond.Font = new Font(new FontFamily("BIZ UDゴシック"), 12);
-        cmbCond.Items.AddRange(new string[] { "を含む", "と一致する", "から始まる", "で終わる" });
-        cmbCond.SelectedIndex = Convert.ToInt32(reg.GetValue("Wildcard", 0));
-        cmbCond.IntegralHeight = true;
-        cmbCond.FlatStyle = FlatStyle.Flat;
-        cmbCond.DropDownStyle = ComboBoxStyle.DropDownList;
-        cmbCond.Anchor = (AnchorStyles.Top | AnchorStyles.Right);
-        Controls.Add(cmbCond);
+    private void init_cmbWildcard()
+    {
+        cmbWildcard.Location = new Point(txtKeyword.Right + 5, topSearchCond);
+        cmbWildcard.Size = new Size(120, heightControls);
+        cmbWildcard.Font = new Font(new FontFamily("BIZ UDゴシック"), 12);
+        cmbWildcard.Items.AddRange(new string[] { "を含む", "と一致する", "から始まる", "で終わる" });
+        cmbWildcard.IntegralHeight = true;
+        cmbWildcard.FlatStyle = FlatStyle.Flat;
+        cmbWildcard.DropDownStyle = ComboBoxStyle.DropDownList;
+        cmbWildcard.Anchor = (AnchorStyles.Top | AnchorStyles.Right);
+        Controls.Add(cmbWildcard);
+    }
 
-        lblDepth.Location = new Point(cmbCond.Right + 5, topSearchCond - 20);
+    private void init_lblDepth()
+    {
+        lblDepth.Location = new Point(cmbWildcard.Right + 5, topSearchCond - 20);
         lblDepth.AutoSize = true;
         lblDepth.Text = "探索する深さ";
         lblDepth.Anchor = (AnchorStyles.Top | AnchorStyles.Right);
         lblDepth.Font = new Font(new FontFamily("BIZ UDゴシック"), 10);
         Controls.Add(lblDepth);
+    }
 
+    private void init_txtDepth()
+    {
         txtDepth.AutoSize = false;
-        txtDepth.Location = new Point(cmbCond.Right + 5, topSearchCond);
+        txtDepth.Location = new Point(cmbWildcard.Right + 5, topSearchCond);
         txtDepth.Size = new Size(50, heightControls);
         txtDepth.BorderStyle = BorderStyle.FixedSingle;
         txtDepth.Anchor = (AnchorStyles.Top | AnchorStyles.Right);
         txtDepth.Font = new Font(new FontFamily("BIZ UDゴシック"), 12);
-        txtDepth.Text = reg.GetValue("Depth", 1).ToString();
         txtDepth.KeyDown += SelectAllText;
         txtDepth.TextChanged += ((object sender, EventArgs e) => txtDepth.Text = Strings.StrConv(txtDepth.Text, VbStrConv.Narrow));
         Controls.Add(txtDepth);
+    }
 
+    private void init_btnSearch()
+    {
         btnSearch.Location = new Point(txtDepth.Right + 10, topSearchCond - 1);
         btnSearch.Size = new Size(100, heightControls);
         btnSearch.Text = "検索";
@@ -208,7 +228,7 @@ class MainForm : Form
         Controls.Add(btnSearch);
     }
 
-    private void InitResult()
+    private void init_lvResult()
     {
         lvResult.Location = new Point(leftControls, topResult);
         lvResult.Size = new Size(Width - 60, Height - 200);
@@ -222,26 +242,45 @@ class MainForm : Form
         lvResult.Columns[0].AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
         lvResult.CellContentDoubleClick += ((Object sender, DataGridViewCellEventArgs e) =>
         {
-            try { Process.Start("Explorer", "/select," + this.baseDir + lvResult.Rows[e.RowIndex].Cells[0].Value.ToString()); }
+            try { Process.Start("Explorer", "/select," + SaveData.SearchCondition.BaseDirectory + lvResult.Rows[e.RowIndex].Cells[0].Value.ToString()); }
             catch { }
         });
         lvResult.CellPainting += lvResult_CellPainting;
+        lvResult.ColumnHeaderMouseClick += ((object sender, DataGridViewCellMouseEventArgs e) => SortItem());
+
         lvResult.AllowUserToAddRows = false;
         lvResult.AllowUserToDeleteRows = false;
         lvResult.AlternatingRowsDefaultCellStyle.BackColor = Color.LightGray;
         Controls.Add(lvResult);
+    }
 
+    private void init_progress()
+    {
         progress.Location = new Point(leftControls, 130);
         progress.Size = new Size(150, 20);
         progress.Style = ProgressBarStyle.Continuous;
         Controls.Add(progress);
+    }
 
+    private void init_lblFinish()
+    {
         lblFinish.Location = new Point(leftControls + 150, 130);
         lblFinish.AutoSize = true;
-        lblFinish.Text = "";
         lblFinish.Anchor = (AnchorStyles.Top | AnchorStyles.Left);
         lblFinish.Font = new Font(new FontFamily("BIZ UDゴシック"), 9);
         Controls.Add(lblFinish);
+    }
+
+    private void load_SaveData()
+    {
+        SearchCondition sc = SaveData.SearchCondition;
+        txtBaseDirectory.Text = sc.BaseDirectory;
+        txtKeyword.Text = sc.Keyword;
+        txtDepth.Text = sc.Depth.ToString();
+        chkFolder.Checked = sc.SearchFolder;
+        chkFile.Checked = sc.SearchFile;
+        chkSort.Checked = sc.Sort;
+        cmbWildcard.SelectedIndex = (int)sc.Wildcard;
     }
 
     /// <summary>
@@ -258,9 +297,18 @@ class MainForm : Form
     /// </summary>
     private async void btnSearch_Click(object sender, EventArgs e)
     {
+        // 動作中なら停止フラグを立ててリターン
         if (btnSearch.Text == "停止")
         {
             cancel = true;
+            return;
+        }
+
+        // ガード
+        int depth;
+        if (!int.TryParse(txtDepth.Text, out depth))
+        {
+            MessageBox.Show("探索する深さには0以上の整数を入力してください。");
             return;
         }
 
@@ -270,28 +318,19 @@ class MainForm : Form
         cancel = false;
         btnSearch.Text = SwitchString(btnSearch.Text, "検索", "停止");
 
-        // 検索条件の取り込み
-        this.baseDir = txtBaseDirectory.Text == "" ? @"C:\" : txtBaseDirectory.Text;
-        string pattern = txtPattern.Text == "" ? "*" : txtPattern.Text;
-        int depth = txtDepth.Text == "" ? 1 : int.Parse(txtDepth.Text);
-
-        Wildcard wc = (Wildcard)cmbCond.SelectedIndex;
-        if (wc == Wildcard.Contain || wc == Wildcard.End) pattern = "*" + pattern;
-        if (wc == Wildcard.Contain || wc == Wildcard.Start) pattern = pattern + "*";
-
         // 検索条件を保存
-        reg.SetValue("BaseDirectory", txtBaseDirectory.Text);
-        reg.SetValue("Pattern", txtPattern.Text);
-        reg.SetValue("Depth", depth, RegistryValueKind.DWord);
-        reg.SetValue("ShouldSearchFolder", Bool2Int(chkFolder.Checked), RegistryValueKind.DWord);
-        reg.SetValue("ShouldSearchFile", Bool2Int(chkFile.Checked), RegistryValueKind.DWord);
-        reg.SetValue("ShouldSort", Bool2Int(chkSort.Checked), RegistryValueKind.DWord);
-        reg.SetValue("Wildcard", cmbCond.SelectedIndex, RegistryValueKind.DWord);
+        SearchCondition sc = new SearchCondition();
+        sc.BaseDirectory = txtBaseDirectory.Text;
+        sc.Keyword = txtKeyword.Text;
+        sc.Depth = depth;
+        sc.SearchFolder = chkFolder.Checked;
+        sc.SearchFile = chkFile.Checked;
+        sc.Sort = chkSort.Checked;
+        sc.Wildcard = (SearchCondition.Wildcards)cmbWildcard.SelectedIndex; ;
+        SaveData.SearchCondition = sc;
 
         // 検索処理を実行。
-        SearchCond condition = (chkFolder.Checked ? SearchCond.Folders : SearchCond.None) |
-                               (chkFile.Checked ? SearchCond.Files : SearchCond.None);
-        await Task.Run(() => FindFiles(this.baseDir, this.baseDir, pattern, depth, condition));
+        await Task.Run(() => FindFiles(sc.BaseDirectory, sc.Depth, sc));
 
         if (chkSort.Checked) SortItem();
 
@@ -317,26 +356,15 @@ class MainForm : Form
     }
 
     /// <summary>
-    /// booleanを[1,0]に変換する。
-    /// </summary>
-    /// <param name="b">真偽値</param>
-    /// <returns>true => 1, false => 0</returns>
-    private int Bool2Int(bool b)
-    {
-        return b ? 1 : 0;
-    }
-
-    /// <summary>
     /// ファイル検索処理の実装
     /// </summary>
-    /// <param name="baseDirectory">おおもとのディレクトリ</param>
     ///  <param name="searchDirectory">検索したいディレクトリ</param>
-    /// <param name="pattern">検索したい文字列</param>
     /// <param name="depth">ディレクトリを何段潜って検索するか</param>
-    /// <param name="condition">フォルダ・ファイルを検索するかどうかの条件</param>
-    private void FindFiles(string baseDirectory, string searchDirectory, string pattern, int depth, SearchCond condition)
+    /// <param name="condition">検索条件</param>
+    private void FindFiles(string searchDirectory, int depth, SearchCondition condition)
     {
-        if (depth <= 0 || cancel || condition == SearchCond.None) return;
+        if (cancel) return;
+        if (!condition.SearchFolder && !condition.SearchFile) return;
 
         List<string> queue = new List<string>();
         List<string> ret = new List<string>();
@@ -346,24 +374,39 @@ class MainForm : Form
         {
             // フォルダを探索キューに追加
             SetProgress(10);
-            foreach (string folder in Directory.EnumerateDirectories(searchDirectory)) queue.Add(folder);
+            foreach (string folder in Directory.EnumerateDirectories(searchDirectory))
+            {
+                queue.Add(folder);
+            }
 
             // 条件に合うフォルダを検索結果リストに積む
             SetProgress(33);
-            if ((SearchCond.Folders & condition) != SearchCond.None)
-                foreach (string folder in Directory.EnumerateDirectories(searchDirectory, pattern)) ret.Add(folder.Replace(baseDirectory, ""));
-
+            if (condition.SearchFolder)
+            {
+                foreach (string folder in Directory.EnumerateDirectories(searchDirectory, condition.Keyword_AppliedWildcard))
+                {
+                    ret.Add(folder);
+                }
+            }
             // 条件に合うファイルを検索結果リストに積む
             SetProgress(66);
-            if ((SearchCond.Files & condition) != SearchCond.None)
-                foreach (string file in Directory.EnumerateFiles(searchDirectory, pattern)) ret.Add(file.Replace(baseDirectory, ""));
+            if (condition.SearchFile)
+            {
+                foreach (string file in Directory.EnumerateFiles(searchDirectory, condition.Keyword_AppliedWildcard))
+                {
+                    ret.Add(file);
+                }
+            }
         }
         catch { }
 
         SetProgress(100);
         AddRows(ret);
 
-        Parallel.ForEach(queue, nextBaseDirectory => FindFiles(baseDirectory, nextBaseDirectory, pattern, depth - 1, condition));
+        if (depth > 1)
+        {
+            Parallel.ForEach(queue, nextSearchDirectory => FindFiles(nextSearchDirectory, depth - 1, condition));
+        }
     }
 
     /// <summary>
@@ -373,10 +416,16 @@ class MainForm : Form
     private void AddRows(List<string> items)
     {
         if (lvResult.InvokeRequired)
+        {
             lvResult.Invoke(new Action<List<string>>(AddRows), new object[] { items });
+        }
         else
+        {
             foreach (string item in items)
+            {
                 lvResult.Rows.Add(new string[] { item });
+            }
+        }
     }
 
     /// <summary>
@@ -391,9 +440,6 @@ class MainForm : Form
         }
         else
         {
-            // 等価なはずだが、なぜか
-            // if (value != 0 && value != 100)
-            // だと、意図通りに動かなかった
             if (value == 0 || value == 100)
             {
                 progress.Value = value;
@@ -492,6 +538,9 @@ class MainForm : Form
 class WindowPos
 {
     private int top, left, width, height;
+
+    public const string DEFAULT_POSITION = "30 30 600 500";
+
     public WindowPos(int top, int left, int width, int height)
     {
         this.top = top < 0 ? 0 : top;
@@ -506,75 +555,163 @@ class WindowPos
     public int Height { get { return height; } }
 }
 
+
+
 class SearchCondition
 {
-    void hoge()
+    public enum Wildcards
     {
-        // 検索条件の取り込み
-        this.baseDir = txtBaseDirectory.Text == "" ? @"C:\" : txtBaseDirectory.Text;
-        string pattern = txtPattern.Text == "" ? "*" : txtPattern.Text;
-        int depth = txtDepth.Text == "" ? 1 : int.Parse(txtDepth.Text);
-
-        Wildcard wc = (Wildcard)cmbCond.SelectedIndex;
-        if (wc == Wildcard.Contain || wc == Wildcard.End) pattern = "*" + pattern;
-        if (wc == Wildcard.Contain || wc == Wildcard.Start) pattern = pattern + "*";
-
-        // 検索条件を保存
-        reg.SetValue("BaseDirectory", txtBaseDirectory.Text);
-        reg.SetValue("Pattern", txtPattern.Text);
-        reg.SetValue("Depth", depth, RegistryValueKind.DWord);
-        reg.SetValue("ShouldSearchFolder", Bool2Int(chkFolder.Checked), RegistryValueKind.DWord);
-        reg.SetValue("ShouldSearchFile", Bool2Int(chkFile.Checked), RegistryValueKind.DWord);
-        reg.SetValue("ShouldSort", Bool2Int(chkSort.Checked), RegistryValueKind.DWord);
-        reg.SetValue("Wildcard", cmbCond.SelectedIndex, RegistryValueKind.DWord);
-
-        // 検索処理を実行。
-        SearchCond condition = (chkFolder.Checked ? SearchCond.Folders : SearchCond.None) |
-                               (chkFile.Checked ? SearchCond.Files : SearchCond.None);
-        await Task.Run(() => FindFiles(this.baseDir, this.baseDir, pattern, depth, condition));
+        Contain,
+        Match,
+        Start,
+        End,
     }
 
+    public const string DEFAULT_BASEDIRECTORY = @"C:\";
+    public const string DEFAULT_KEYWORD = "";
+    public const int DEFAULT_DEPTH = 1;
+    public const bool DEFAULT_SEARCHFOLDER = true;
+    public const bool DEFAULT_SERACHFILE = true;
+    public const bool DEFAULT_SORT = true;
+    public const Wildcards DEFAULT_WILDCARD = Wildcards.Contain;
+
+    private string _BaseDirectory = DEFAULT_BASEDIRECTORY;
+    public string BaseDirectory
+    {
+        get
+        {
+            return _BaseDirectory == "" ? DEFAULT_BASEDIRECTORY : _BaseDirectory;
+        }
+        set { _BaseDirectory = value; }
+    }
+
+    private string _Keyword_AppliedWildcard = DEFAULT_KEYWORD;
+    public string Keyword_AppliedWildcard
+    {
+        get { return _Keyword_AppliedWildcard; }
+    }
+
+    private string _Keyword = DEFAULT_KEYWORD;
+    public string Keyword
+    {
+        get { return _Keyword; }
+        set
+        {
+            _Keyword = value;
+            applyWildcard();
+        }
+    }
+
+    private int _Depth = DEFAULT_DEPTH;
+    public int Depth
+    {
+        get { return _Depth; }
+        set
+        {
+            if (value < 1) throw new Exception("1未満の値は代入できません");
+            _Depth = value;
+        }
+    }
+
+    private bool _SearchFolder = DEFAULT_SEARCHFOLDER;
+    public bool SearchFolder
+    {
+        get { return _SearchFolder; }
+        set { _SearchFolder = value; }
+    }
+
+    private bool _SearchFile = DEFAULT_SERACHFILE;
+    public bool SearchFile
+    {
+        get { return _SearchFile; }
+        set { _SearchFile = value; }
+    }
+
+    private bool _Sort = DEFAULT_SORT;
+    public bool Sort
+    {
+        get { return _Sort; }
+        set { _Sort = value; }
+    }
+
+    private Wildcards _Wildcard = DEFAULT_WILDCARD;
+    public Wildcards Wildcard
+    {
+        get { return _Wildcard; }
+        set
+        {
+            _Wildcard = value;
+            applyWildcard();
+        }
+    }
+
+    private void applyWildcard()
+    {
+        _Keyword_AppliedWildcard = _Keyword;
+        if (Wildcard == Wildcards.Contain || Wildcard == Wildcards.End) _Keyword_AppliedWildcard = "*" + _Keyword_AppliedWildcard;
+        if (Wildcard == Wildcards.Contain || Wildcard == Wildcards.Start) _Keyword_AppliedWildcard = _Keyword_AppliedWildcard + "*";
+    }
+
+    public SearchCondition Clone()
+    {
+        SearchCondition newsc = new SearchCondition();
+        newsc._BaseDirectory = this._BaseDirectory;
+        newsc._Depth = this._Depth;
+        newsc._Keyword = this._Keyword;
+        newsc._SearchFile = this._SearchFile;
+        newsc._SearchFolder = this._SearchFolder;
+        newsc._Sort = this._Sort;
+        newsc._Wildcard = this._Wildcard;
+        return newsc;
+    }
 }
 
 class SaveData
 {
-    private const string DEFAULT_POSITION = "30 30 600 500";
-    private RegistryKey key = Registry.CurrentUser.CreateSubKey(@"SOFTWARE\Yamato\FindFiles");
+    private static RegistryKey key = Registry.CurrentUser.CreateSubKey(@"SOFTWARE\Yamato\FindFiles");
     public static WindowPos WindowPosition
     {
         get
         {
-            int[] pos = new SaveData().key.GetValue("Position", DEFAULT_POSITION).ToString().Split(' ').Select(x => int.Parse(x)).ToArray();
+            int[] pos = key.GetValue("Position", WindowPos.DEFAULT_POSITION).ToString().Split(' ').Select(x => int.Parse(x)).ToArray();
             return new WindowPos(pos[0], pos[1], pos[2], pos[3]);
         }
         set
         {
             string pos = String.Join(" ", new int[] { value.Top, value.Left, value.Width, value.Height }.Select(x => x.ToString()));
-            new SaveData().key.SetValue("Position", pos);
+            key.SetValue("Position", pos);
+        }
+    }
+    public static SearchCondition SearchCondition
+    {
+        get
+        {
+            SearchCondition sc = new SearchCondition();
+            try
+            {
+                sc.BaseDirectory = key.GetValue("BaseDirectory", SearchCondition.DEFAULT_BASEDIRECTORY).ToString();
+                sc.Keyword = key.GetValue("Keyword", SearchCondition.DEFAULT_KEYWORD).ToString();
+                sc.Depth = (int)(key.GetValue("Depth", SearchCondition.DEFAULT_DEPTH));
+                sc.SearchFolder = Convert.ToBoolean(key.GetValue("SearchFolder", SearchCondition.DEFAULT_SEARCHFOLDER).ToString());
+                sc.SearchFile = Convert.ToBoolean(key.GetValue("SearchFile", SearchCondition.DEFAULT_SERACHFILE).ToString());
+                sc.Sort = Convert.ToBoolean(key.GetValue("Sort", SearchCondition.DEFAULT_SORT).ToString());
+                sc.Wildcard = (SearchCondition.Wildcards)(int)(key.GetValue("Wildcard", SearchCondition.DEFAULT_WILDCARD));
+            }
+            catch { }
+            return sc;
+        }
+        set
+        {
+            key.SetValue("BaseDirectory", value.BaseDirectory, RegistryValueKind.String);
+            key.SetValue("Keyword", value.Keyword, RegistryValueKind.String);
+            key.SetValue("Depth", value.Depth, RegistryValueKind.DWord);
+            key.SetValue("SearchFolder", value.SearchFolder.ToString(), RegistryValueKind.String);
+            key.SetValue("SearchFile", value.SearchFile.ToString(), RegistryValueKind.String);
+            key.SetValue("Sort", value.Sort.ToString(), RegistryValueKind.String);
+            key.SetValue("Wildcard", (int)value.Wildcard, RegistryValueKind.DWord);
         }
     }
 }
-
-// class FoundItem
-// {
-//     enum Attributes
-//     {
-//         File,
-//         Folder,
-//     }
-//     private Attributes _attribute;
-//     private string _path;
-
-//     public Attributes Attribute { get { return _attribute; } }
-//     public string Path { get { return _path; } }
-
-//     public FoundItem(Attributes Attribute, string Path)
-//     {
-//         FoundItem fi = new FoundItem();
-//         fi._attribute = Attribute;
-//         fi._path = Path;
-//     }
-// }
 
 /// <summary>
 /// フォルダ選択ダイアログボックス

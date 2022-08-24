@@ -240,7 +240,7 @@ class MainForm : Form
         lvResult.Columns[0].AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
         lvResult.CellContentDoubleClick += ((Object sender, DataGridViewCellEventArgs e) =>
         {
-            try { Process.Start("Explorer", "/select," + SaveData.SearchCondition.BaseDirectory + lvResult.Rows[e.RowIndex].Cells[0].Value.ToString()); }
+            try { Process.Start("Explorer", "/select," + lvResult.Rows[e.RowIndex].Cells[0].Value.ToString()); }
             catch { }
         });
         lvResult.CellPainting += lvResult_CellPainting;

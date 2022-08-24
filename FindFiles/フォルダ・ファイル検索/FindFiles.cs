@@ -370,7 +370,7 @@ class MainForm : Form
         // アクセス権限のないフォルダだとエラーが発生するのでエラーをもみ消す。
         try
         {
-            // フォルダを探索キューに追加
+            // サブフォルダを取得
             SetProgress(10);
             foreach (string folder in Directory.EnumerateDirectories(searchDirectory))
             {
@@ -381,7 +381,7 @@ class MainForm : Form
             SetProgress(33);
             if (condition.SearchFolder)
             {
-                foreach (string folder in Directory.EnumerateDirectories(searchDirectory, condition.Keyword_AppliedWildcard))
+                foreach (string folder in subfolders.Where(f => IsMatch(f, condition)))
                 {
                     ret.Add(folder);
                 }
@@ -405,6 +405,26 @@ class MainForm : Form
         {
             Parallel.ForEach(subfolders, nextSearchDirectory => FindFiles(nextSearchDirectory, depth - 1, condition));
         }
+    }
+
+    // なぜかRegExがうまく動かないので作成
+    private bool IsMatch(string input, SearchCondition condition)
+    {
+        switch (condition.Wildcard)
+        {
+            case SearchCondition.Wildcards.Contain:
+                return input.Contains(condition.Keyword);
+
+            case SearchCondition.Wildcards.Start:
+                return input.StartsWith(condition.Keyword);
+
+            case SearchCondition.Wildcards.End:
+                return input.EndsWith(condition.Keyword);
+
+            case SearchCondition.Wildcards.Match:
+                return input == condition.Keyword;
+        }
+        throw new Exception("想定外の分岐:IsMatch");
     }
 
     /// <summary>

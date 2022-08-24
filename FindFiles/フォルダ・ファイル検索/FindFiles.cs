@@ -364,7 +364,7 @@ class MainForm : Form
         if (cancel) return;
         if (!condition.SearchFolder && !condition.SearchFile) return;
 
-        List<string> subfolders = new List<string>();
+        List<string> subfolders = new List<string>(); ;
         List<string> ret = new List<string>();
 
         // アクセス権限のないフォルダだとエラーが発生するのでエラーをもみ消す。
@@ -410,19 +410,22 @@ class MainForm : Form
     // なぜかRegExがうまく動かないので作成
     private bool IsMatch(string input, SearchCondition condition)
     {
+        string inputLower = Path.GetFileName(input).ToLower();
+        string keyword = condition.Keyword.ToLower();
+
         switch (condition.Wildcard)
         {
             case SearchCondition.Wildcards.Contain:
-                return input.Contains(condition.Keyword);
+                return inputLower.Contains(keyword);
 
             case SearchCondition.Wildcards.Start:
-                return input.StartsWith(condition.Keyword);
+                return inputLower.StartsWith(keyword);
 
             case SearchCondition.Wildcards.End:
-                return input.EndsWith(condition.Keyword);
+                return inputLower.EndsWith(keyword);
 
             case SearchCondition.Wildcards.Match:
-                return input == condition.Keyword;
+                return inputLower == keyword;
         }
         throw new Exception("想定外の分岐:IsMatch");
     }

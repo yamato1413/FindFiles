@@ -364,42 +364,31 @@ class MainForm : Form
         if (cancel) return;
         if (!condition.SearchFolder && !condition.SearchFile) return;
 
-        List<string> subfolders = new List<string>(); ;
-        List<string> ret = new List<string>();
+        IEnumerable<string> subfolders = new List<string>();
 
         // アクセス権限のないフォルダだとエラーが発生するのでエラーをもみ消す。
         try
         {
             // サブフォルダを取得
             SetProgress(10);
-            foreach (string folder in Directory.EnumerateDirectories(searchDirectory))
-            {
-                subfolders.Add(folder);
-            }
+            subfolders = Directory.EnumerateDirectories(searchDirectory);
 
             // 条件に合うフォルダを検索結果リストに積む
             SetProgress(33);
             if (condition.SearchFolder)
             {
-                foreach (string folder in subfolders.Where(f => IsMatch(f, condition)))
-                {
-                    ret.Add(folder);
-                }
+                AddRows(subfolders.Where(f => IsMatch(f, condition)));
             }
             // 条件に合うファイルを検索結果リストに積む
             SetProgress(66);
             if (condition.SearchFile)
             {
-                foreach (string file in Directory.EnumerateFiles(searchDirectory, condition.Keyword_AppliedWildcard))
-                {
-                    ret.Add(file);
-                }
+                AddRows(Directory.EnumerateFiles(searchDirectory, condition.Keyword_AppliedWildcard));
             }
         }
         catch { }
 
         SetProgress(100);
-        AddRows(ret);
 
         if (depth > 1)
         {
@@ -434,11 +423,11 @@ class MainForm : Form
     /// 検索結果をUIに反映する。
     /// </summary>
     /// <param name="items">検索結果のリスト</param>
-    private void AddRows(List<string> items)
+    private void AddRows(IEnumerable<string> items)
     {
         if (lvResult.InvokeRequired)
         {
-            lvResult.Invoke(new Action<List<string>>(AddRows), new object[] { items });
+            lvResult.Invoke(new Action<IEnumerable<string>>(AddRows), new object[] { items });
         }
         else
         {

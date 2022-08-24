@@ -18,7 +18,35 @@ public class Program
     [STAThread]
     public static void Main(string[] args)
     {
-        Application.Run(new MainForm());
+        if (args.Length != 0 && args[0] == "--makeIndex")
+        {
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
+            new BackGroundForm();
+            Application.Run();
+        }
+        else
+        {
+            Application.Run(new MainForm());
+        }
+    }
+}
+
+class BackGroundForm : Form
+{
+    private string appDir;
+
+    public BackGroundForm()
+    {
+        appDir = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
+        // タスクバーに表示しない
+        this.ShowInTaskbar = false;
+        Task.Run(() => MakeIndex());
+    }
+    private void MakeIndex()
+    {
+        StreamWriter sw = new StreamWriter(appDir + @"\index.txt");
+        sw.Close();
     }
 }
 

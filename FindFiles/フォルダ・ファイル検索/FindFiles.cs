@@ -16,7 +16,7 @@ using Microsoft.Win32;
 public class Program
 {
     [STAThread]
-    public static void Main()
+    public static void Main(string[] args)
     {
         Application.Run(new MainForm());
     }
@@ -87,9 +87,7 @@ class MainForm : Form
 
         // フォームを閉じるときに位置とサイズを記録する
         this.Closing += ((object sender, System.ComponentModel.CancelEventArgs e) =>
-        {
-            SaveData.WindowPosition = new WindowPos(this.Top, this.Left, this.Width, this.Height);
-        });
+            SaveData.WindowPosition = new WindowPos(this.Top, this.Left, this.Width, this.Height));
 
         this.Text = "フォルダ・ファイル検索 - Yamato_Tools";
         this.AllowDrop = true;
@@ -211,7 +209,8 @@ class MainForm : Form
         txtDepth.Anchor = (AnchorStyles.Top | AnchorStyles.Right);
         txtDepth.Font = new Font(new FontFamily("BIZ UDゴシック"), 12);
         txtDepth.KeyDown += SelectAllText;
-        txtDepth.TextChanged += ((object sender, EventArgs e) => txtDepth.Text = Strings.StrConv(txtDepth.Text, VbStrConv.Narrow));
+        txtDepth.TextChanged += ((object sender, EventArgs e) =>
+            txtDepth.Text = Strings.StrConv(txtDepth.Text, VbStrConv.Narrow));
         Controls.Add(txtDepth);
     }
 

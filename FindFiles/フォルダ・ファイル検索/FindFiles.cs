@@ -4,10 +4,8 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
-using System.Net.Configuration;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.WindowsRuntime;
-using System.Runtime.Remoting.Lifetime;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -366,7 +364,7 @@ class MainForm : Form
         if (cancel) return;
         if (!condition.SearchFolder && !condition.SearchFile) return;
 
-        List<string> queue = new List<string>();
+        List<string> subfolders = new List<string>();
         List<string> ret = new List<string>();
 
         // アクセス権限のないフォルダだとエラーが発生するのでエラーをもみ消す。
@@ -376,7 +374,7 @@ class MainForm : Form
             SetProgress(10);
             foreach (string folder in Directory.EnumerateDirectories(searchDirectory))
             {
-                queue.Add(folder);
+                subfolders.Add(folder);
             }
 
             // 条件に合うフォルダを検索結果リストに積む
@@ -405,7 +403,7 @@ class MainForm : Form
 
         if (depth > 1)
         {
-            Parallel.ForEach(queue, nextSearchDirectory => FindFiles(nextSearchDirectory, depth - 1, condition));
+            Parallel.ForEach(subfolders, nextSearchDirectory => FindFiles(nextSearchDirectory, depth - 1, condition));
         }
     }
 

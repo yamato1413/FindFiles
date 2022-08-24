@@ -91,7 +91,7 @@ class MainForm : Form
             SaveData.WindowPosition = new WindowPos(this.Top, this.Left, this.Width, this.Height);
         });
 
-        this.Text = "フォルダ・ファイル検索 - ISHII_Tools";
+        this.Text = "フォルダ・ファイル検索 - Yamato_Tools";
         this.AllowDrop = true;
         this.Shown += ((object sender, EventArgs e) => txtKeyword.Focus());
     }

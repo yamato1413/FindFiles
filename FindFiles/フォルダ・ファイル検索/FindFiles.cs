@@ -404,13 +404,13 @@ class MainForm : Form
             SetProgress(33);
             if (condition.SearchFolder)
             {
-                AddRows(subfolders.Where(f => IsMatch(f, condition)));
+                Task.Run(() => AddRows(subfolders.Where(f => IsMatch(f, condition))));
             }
             // 条件に合うファイルを検索結果リストに積む
             SetProgress(66);
             if (condition.SearchFile)
             {
-                AddRows(Directory.EnumerateFiles(searchDirectory, condition.Keyword_AppliedWildcard));
+                Task.Run(() => AddRows(Directory.EnumerateFiles(searchDirectory, condition.Keyword_AppliedWildcard)));
             }
         }
         catch { }

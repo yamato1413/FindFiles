@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.WindowsRuntime;
 using System.Text.RegularExpressions;
@@ -35,18 +36,44 @@ public class Program
 class BackGroundForm : Form
 {
     private string appDir;
+    private List<string> allItems;
 
     public BackGroundForm()
     {
         appDir = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
+        queue = new List<string>();
         // タスクバーに表示しない
         this.ShowInTaskbar = false;
         Task.Run(() => MakeIndex());
     }
     private void MakeIndex()
     {
+        SearchCondition sc = SaveData.SearchCondition;
+        CollectItems(sc.BaseDirectory, 999);
+
         StreamWriter sw = new StreamWriter(appDir + @"\index.txt");
         sw.Close();
+    }
+    private void CollectItems(string searchDirectory, int depth)
+    {
+        IEnumerable<string> subfolders = new List<string>();
+        IEnumerable<string> items = new List<string>();
+
+        // アクセス権限のないフォルダだとエラーが発生するのでエラーをもみ消す。
+        try
+        {
+            // サブフォルダを取得
+            subfolders = Directory.EnumerateDirectories(searchDirectory);
+            items = Directory.EnumerateFiles(searchDirectory);
+        }
+        catch { }
+
+        allItems.Concat(subfolders).Concat(items);
+
+        if (depth > 1)
+        {
+            Parallel.ForEach(subfolders, nextSearchDirectory => FindFiles(nextSearchDirectory, depth - 1));
+        }
     }
 }
 

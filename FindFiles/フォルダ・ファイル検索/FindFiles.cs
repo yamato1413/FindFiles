@@ -33,19 +33,19 @@ public class Program
 class IndexMaker
 {
     private string appDir;
-    private List<string> allItems;
+    private List<string[]> allItems;
 
     public IndexMaker()
     {
         appDir = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
-        allItems = new List<string>();
+        allItems = new List<string[]>();
         MakeIndex();
     }
     private void MakeIndex()
     {
         SearchCondition sc = SaveData.SearchCondition;
         MessageBox.Show(sc.BaseDirectory);
-        CollectItems(sc.BaseDirectory, 5);
+        CollectItems(sc.BaseDirectory, 5, sc);
         MessageBox.Show(allItems.Count.ToString());
 
         FileStream fs = new FileStream(
@@ -54,10 +54,10 @@ class IndexMaker
             FileAccess.Write,
             FileShare.None);
         StreamWriter sw = new StreamWriter(fs);
-        foreach (string item in allItems) sw.WriteLine(item);
+        foreach (string[] item in allItems) sw.WriteLine(string.Join("|", item));
         sw.Close();
     }
-    private void CollectItems(string searchDirectory, int depth)
+    private void CollectItems(string searchDirectory, int depth, SearchCondition sc)
     {
         IEnumerable<string> subfolders = new List<string>();
         IEnumerable<string> items = new List<string>();
@@ -72,12 +72,14 @@ class IndexMaker
         catch { }
         lock (allItems)
         {
-            foreach (string item in subfolders) allItems.Add(item);
-            foreach (string item in items) allItems.Add(item);
+            foreach (string item in subfolders)
+                allItems.Add(new string[] { item, item.Replace(sc.BaseDirectory, "").Count(c => c == '\\').ToString() });
+            foreach (string item in items)
+                allItems.Add(new string[] { item, item.Replace(sc.BaseDirectory, "").Count(c => c == '\\').ToString() });
         }
         if (depth > 1)
         {
-            Parallel.ForEach(subfolders, nextSearchDirectory => CollectItems(nextSearchDirectory, depth - 1));
+            Parallel.ForEach(subfolders, nextSearchDirectory => CollectItems(nextSearchDirectory, depth - 1, sc));
         }
     }
 }
@@ -374,7 +376,14 @@ class MainForm : Form
         StreamReader index = OpenIndexFile(sc.BaseDirectory + @"\findfiles_index.txt");
         if (index != null)
         {
-            await Task.Run(() => FindFilesFromIndex(index, sc));
+            List<string[]> items = new List<string[]>();
+            while (!index.EndOfStream)
+            {
+                items.Add(index.ReadLine().Split('|'));
+            }
+            index.Close();
+
+            await Task.Run(() => FindFilesFromIndex(items, sc));
         }
         else
         {
@@ -503,15 +512,12 @@ class MainForm : Form
         }
     }
 
-    private void FindFilesFromIndex(StreamReader index, SearchCondition sc)
+    private void FindFilesFromIndex(List<string[]> items, SearchCondition sc)
     {
-        List<string> items = new List<string>();
-        while (!index.EndOfStream)
-        {
-            items.Add(index.ReadLine());
-        }
-        AddRows(items.Where(item => IsMatch(Path.GetFileName(item), sc)));
-        index.Close();
+        AddRows(items
+            .Where(item => IsMatch(Path.GetFileName(item[0]), sc) && int.Parse(item[1]) <= sc.Depth)
+            .Select(item => item[0])
+        );
     }
 
     // なぜかRegExがうまく動かないので作成

@@ -44,9 +44,7 @@ class IndexMaker
     private void MakeIndex()
     {
         SearchCondition sc = SaveData.SearchCondition;
-        MessageBox.Show(sc.BaseDirectory);
         CollectItems(sc.BaseDirectory, 5, sc);
-        MessageBox.Show(allItems.Count.ToString());
 
         FileStream fs = new FileStream(
             sc.BaseDirectory + @"\findfiles_index.txt",

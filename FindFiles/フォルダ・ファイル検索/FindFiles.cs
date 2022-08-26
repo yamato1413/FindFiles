@@ -71,9 +71,22 @@ class IndexMaker
         lock (allItems)
         {
             foreach (string item in subfolders)
-                allItems.Add(new string[] { item, item.Replace(sc.BaseDirectory, "").Count(c => c == '\\').ToString() });
+            {
+                allItems.Add(new string[] {
+                    item,
+                    item.Replace(sc.BaseDirectory, "").Count(c => c == '\\').ToString(),
+                    "folder" }
+                );
+
+            }
             foreach (string item in items)
-                allItems.Add(new string[] { item, item.Replace(sc.BaseDirectory, "").Count(c => c == '\\').ToString() });
+            {
+                allItems.Add(new string[] {
+                    item,
+                    item.Replace(sc.BaseDirectory, "").Count(c => c == '\\').ToString(),
+                    "file" }
+                );
+            }
         }
         if (depth > 1)
         {
@@ -513,7 +526,10 @@ class MainForm : Form
     private void FindFilesFromIndex(List<string[]> items, SearchCondition sc)
     {
         AddRows(items
-            .Where(item => IsMatch(Path.GetFileName(item[0]), sc) && int.Parse(item[1]) <= sc.Depth)
+            .Where(item =>
+                IsMatch(Path.GetFileName(item[0]), sc)
+                && int.Parse(item[1]) <= sc.Depth
+                && ((item[2] == "folder" && sc.SearchFolder) || (item[2] == "file" && sc.SearchFile)))
             .Select(item => item[0])
         );
     }

@@ -21,10 +21,7 @@ public class Program
     {
         if (args.Length != 0 && args[0] == "--makeIndex")
         {
-            Application.EnableVisualStyles();
-            Application.SetCompatibleTextRenderingDefault(false);
-            new BackGroundForm();
-            Application.Run();
+            new IndexMaker();
         }
         else
         {
@@ -33,25 +30,31 @@ public class Program
     }
 }
 
-class BackGroundForm : Form
+class IndexMaker
 {
     private string appDir;
     private List<string> allItems;
 
-    public BackGroundForm()
+    public IndexMaker()
     {
         appDir = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
-        queue = new List<string>();
-        // タスクバーに表示しない
-        this.ShowInTaskbar = false;
-        Task.Run(() => MakeIndex());
+        allItems = new List<string>();
+        MakeIndex();
     }
     private void MakeIndex()
     {
         SearchCondition sc = SaveData.SearchCondition;
-        CollectItems(sc.BaseDirectory, 999);
+        MessageBox.Show(sc.BaseDirectory);
+        CollectItems(sc.BaseDirectory, 5);
+        MessageBox.Show(allItems.Count.ToString());
 
-        StreamWriter sw = new StreamWriter(appDir + @"\index.txt");
+        FileStream fs = new FileStream(
+            sc.BaseDirectory + @"\findfiles_index.txt",
+            FileMode.Create,
+            FileAccess.Write,
+            FileShare.None);
+        StreamWriter sw = new StreamWriter(fs);
+        foreach (string item in allItems) sw.WriteLine(item);
         sw.Close();
     }
     private void CollectItems(string searchDirectory, int depth)
@@ -67,12 +70,14 @@ class BackGroundForm : Form
             items = Directory.EnumerateFiles(searchDirectory);
         }
         catch { }
-
-        allItems.Concat(subfolders).Concat(items);
-
+        lock (allItems)
+        {
+            foreach (string item in subfolders) allItems.Add(item);
+            foreach (string item in items) allItems.Add(item);
+        }
         if (depth > 1)
         {
-            Parallel.ForEach(subfolders, nextSearchDirectory => FindFiles(nextSearchDirectory, depth - 1));
+            Parallel.ForEach(subfolders, nextSearchDirectory => CollectItems(nextSearchDirectory, depth - 1));
         }
     }
 }
@@ -357,32 +362,26 @@ class MainForm : Form
         }
 
         // ガード
-        int depth;
-        if (!int.TryParse(txtDepth.Text, out depth))
+        if (!CanParseDepth())
         {
             MessageBox.Show("探索する深さには0以上の整数を入力してください。");
             return;
         }
 
-        // Initialize
-        lblFinish.Text = "";
-        lvResult.Rows.Clear();
-        cancel = false;
-        btnSearch.Text = SwitchString(btnSearch.Text, "検索", "停止");
+        InitializeBeforeSearch();
+        SearchCondition sc = Save();
 
-        // 検索条件を保存
-        SearchCondition sc = new SearchCondition();
-        sc.BaseDirectory = txtBaseDirectory.Text;
-        sc.Keyword = txtKeyword.Text;
-        sc.Depth = depth;
-        sc.SearchFolder = chkFolder.Checked;
-        sc.SearchFile = chkFile.Checked;
-        sc.Sort = chkSort.Checked;
-        sc.Wildcard = (SearchCondition.Wildcards)cmbWildcard.SelectedIndex; ;
-        SaveData.SearchCondition = sc;
-
-        // 検索処理を実行。
-        await Task.Run(() => FindFiles(sc.BaseDirectory, sc.Depth, sc));
+        StreamReader index = OpenIndexFile(sc.BaseDirectory + @"\findfiles_index.txt");
+        if (index != null)
+        {
+            await Task.Run(() => FindFilesFromIndex(index, sc));
+        }
+        else
+        {
+            // インデックスが存在しなかったり作成中で開けなかった場合
+            MakeIndex();
+            await Task.Run(() => FindFiles(sc.BaseDirectory, sc.Depth, sc));
+        }
 
         if (chkSort.Checked) SortItem();
 
@@ -391,6 +390,57 @@ class MainForm : Form
         lblFinish.Text = "検索完了";
         btnSearch.Text = SwitchString(btnSearch.Text, "検索", "停止");
     }
+
+    private bool CanParseDepth()
+    {
+        int depth;
+        return int.TryParse(txtDepth.Text, out depth);
+    }
+
+    private void InitializeBeforeSearch()
+    {
+        lblFinish.Text = "";
+        lvResult.Rows.Clear();
+        cancel = false;
+        btnSearch.Text = SwitchString(btnSearch.Text, "検索", "停止");
+    }
+
+    private SearchCondition Save()
+    {
+        // 検索条件を保存
+        SearchCondition sc = new SearchCondition();
+        sc.BaseDirectory = txtBaseDirectory.Text;
+        sc.Keyword = txtKeyword.Text;
+        sc.Depth = int.Parse(txtDepth.Text);
+        sc.SearchFolder = chkFolder.Checked;
+        sc.SearchFile = chkFile.Checked;
+        sc.Sort = chkSort.Checked;
+        sc.Wildcard = (SearchCondition.Wildcards)cmbWildcard.SelectedIndex;
+        SaveData.SearchCondition = sc;
+        return sc;
+    }
+
+    private StreamReader OpenIndexFile(string pathIndexFile)
+    {
+        try
+        {
+            FileStream fs = new FileStream(pathIndexFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            return new StreamReader(fs);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private void MakeIndex()
+    {
+        ProcessStartInfo psi = new ProcessStartInfo();
+        psi.FileName = System.Reflection.Assembly.GetExecutingAssembly().Location;
+        psi.Arguments = "--makeIndex";
+        Process.Start(psi);
+    }
+
 
     /// <summary>
     /// 入力された文字列と異なる方の文字列を返却する。
@@ -419,6 +469,8 @@ class MainForm : Form
         if (!condition.SearchFolder && !condition.SearchFile) return;
 
         IEnumerable<string> subfolders = new List<string>();
+        IEnumerable<string> files = new List<string>();
+
 
         // アクセス権限のないフォルダだとエラーが発生するのでエラーをもみ消す。
         try
@@ -426,18 +478,19 @@ class MainForm : Form
             // サブフォルダを取得
             SetProgress(10);
             subfolders = Directory.EnumerateDirectories(searchDirectory);
+            files = Directory.EnumerateFiles(searchDirectory);
 
             // 条件に合うフォルダを検索結果リストに積む
             SetProgress(33);
             if (condition.SearchFolder)
             {
-                Task.Run(() => AddRows(subfolders.Where(f => IsMatch(f, condition))));
+                Task.Run(() => AddRows(subfolders.Where(f => IsMatch(Path.GetFileName(f), condition))));
             }
             // 条件に合うファイルを検索結果リストに積む
             SetProgress(66);
             if (condition.SearchFile)
             {
-                Task.Run(() => AddRows(Directory.EnumerateFiles(searchDirectory, condition.Keyword_AppliedWildcard)));
+                Task.Run(() => AddRows(files.Where(f => IsMatch(Path.GetFileName(f), condition))));
             }
         }
         catch { }
@@ -450,10 +503,21 @@ class MainForm : Form
         }
     }
 
+    private void FindFilesFromIndex(StreamReader index, SearchCondition sc)
+    {
+        List<string> items = new List<string>();
+        while (!index.EndOfStream)
+        {
+            items.Add(index.ReadLine());
+        }
+        AddRows(items.Where(item => IsMatch(Path.GetFileName(item), sc)));
+        index.Close();
+    }
+
     // なぜかRegExがうまく動かないので作成
     private bool IsMatch(string input, SearchCondition condition)
     {
-        string inputLower = Path.GetFileName(input).ToLower();
+        string inputLower = input.ToLower();
         string keyword = condition.Keyword.ToLower();
 
         switch (condition.Wildcard)

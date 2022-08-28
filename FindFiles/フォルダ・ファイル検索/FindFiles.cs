@@ -7,7 +7,6 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using Microsoft.VisualBasic;
-using Microsoft.Win32;
 
 namespace FindFiles
 {
@@ -18,7 +17,7 @@ namespace FindFiles
         {
             if (args.Length != 0 && args[0] == "--makeIndex")
             {
-                new IndexMaker();
+                new IndexMaker().MakeIndex();
             }
             else
             {
@@ -316,25 +315,28 @@ namespace FindFiles
             InitializeBeforeSearch();
             SearchCondition sc = Save();
 
-            string indexpath = sc.BaseDirectory + @"\findfiles_index.txt";
+            string indexpath = new IndexMaker().IndexPath;
             StreamReader index = OpenIndexFile(indexpath);
-            if (index != null && IsOldIndex(indexpath))
+            if (index != null && IsLatestIndex(indexpath))
             {
+                MessageBox.Show("use index");
+
                 List<string[]> items = new List<string[]>();
                 while (!index.EndOfStream)
                 {
                     items.Add(index.ReadLine().Split('|'));
                 }
                 await Task.Run(() => FindFilesFromIndex(items, sc));
+                if (index != null) index.Close();
+
             }
             else
             {
-                // インデックスが存在しなかったり作成中で開けなかった場合
-                MakeIndex();
+                if (index != null) index.Close();
+                new IndexMaker().MakeIndex();
                 await Task.Run(() => FindFiles(sc.BaseDirectory, sc.Depth, sc));
             }
 
-            if (index != null) index.Close();
 
             if (chkSort.Checked) SortItem();
 
@@ -344,9 +346,9 @@ namespace FindFiles
             btnSearch.Text = SwitchString(btnSearch.Text, "検索", "停止");
         }
 
-        private bool IsOldIndex(string indexpath)
+        private bool IsLatestIndex(string indexpath)
         {
-            return File.GetLastWriteTime(indexpath).AddMinutes(15) < DateTime.Now;
+            return File.GetLastWriteTime(indexpath).AddMinutes(15) > DateTime.Now;
         }
 
         private bool CanParseDepth()
@@ -470,6 +472,11 @@ namespace FindFiles
                     && ((item[2] == "folder" && sc.SearchFolder) || (item[2] == "file" && sc.SearchFile)))
                 .Select(item => item[0])
             );
+
+        }
+        private void FindFilesFromIndex(DirectoryItem index, SearchCondition sc)
+        {
+
         }
 
         // なぜかRegExがうまく動かないので作成
